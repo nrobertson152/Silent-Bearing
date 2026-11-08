@@ -5,6 +5,7 @@ extends Node
 
 const GameData := preload("res://scripts/data.gd")
 const Hud := preload("res://scripts/ui/hud.gd")
+const Deck := preload("res://scripts/deck/deck.gd")
 const Interior := preload("res://scripts/interior/interior.gd")
 const Menu := preload("res://scripts/ui/menu.gd")
 const Player := preload("res://scripts/interior/player.gd")
@@ -14,6 +15,8 @@ const World := preload("res://scripts/sim/world.gd")
 const WorldView := preload("res://scripts/view/world_view.gd")
 
 const INTERIOR_ORIGIN := Vector3(0, -6000, 0)
+const DECK_ORIGIN := Vector3(0, -3000, 0)
+const EXPOSED := ["deck", "gun", "aa"]
 const STATION_TITLES := {"chart": "Plot table", "sonar": "Hydrophones", "tdc": "Torpedo data computer",
 	"damage": "Damage control", "gauges": "Control room gauges"}
 
@@ -21,6 +24,9 @@ var world: World
 var view: WorldView
 var interior: Interior
 var player: Player
+var deck: Deck
+var deck_player: Player
+var prev_mode := "interior"
 var world_cam: Camera3D
 var hud: Hud
 var menu: Menu
@@ -36,11 +42,9 @@ var nat_id := ""
 var tgt_id := ""
 var chart_r := 6000.0
 var zoomed := false
-var free_yaw := 0.0
-var free_pitch := -0.05
-var ext_yaw := 0.6
-var ext_pitch := 0.22
-var ext_dist := 140.0
+var ext_yaw := 0.45
+var ext_pitch := 0.16
+var ext_dist := 70.0
 var scope_wash := 0.0
 var range_err := 0.0
 var aa_yaw := 0.0
@@ -105,12 +109,14 @@ func _ready() -> void:
 
 # ------------------------------------------------------------------ setup
 func _clear_world() -> void:
-	for n in [view, interior, player]:
+	for n in [view, interior, player, deck, deck_player]:
 		if n != null and is_instance_valid(n):
 			n.queue_free()
 	view = null
 	interior = null
 	player = null
+	deck = null
+	deck_player = null
 
 
 func _demo() -> void:
@@ -160,9 +166,19 @@ func start_mission(nid: String, tid: String) -> void:
 	interior.set_world(world)
 	player = Player.new()
 	add_child(player)
-	player.global_position = INTERIOR_ORIGIN + Vector3(0.5, 0.05, 3.2)
+	player.global_position = INTERIOR_ORIGIN + Interior.SPAWN
 	player.face(0.0)
 	player.cam.environment = interior_env
+	deck = Deck.new()
+	deck.position = DECK_ORIGIN
+	add_child(deck)
+	deck.build(view.sub_node, nat)
+	deck_player = Player.new()
+	add_child(deck_player)
+	deck_player.enabled = false
+	deck_player.global_position = DECK_ORIGIN + deck.spots["bridge"]
+	ext_dist = float(nat["sub"]["len"]) * 0.7
+	prev_mode = "interior"
 	state = "play"
 	in_patrol = true
 	paused = false
@@ -213,9 +229,13 @@ func set_mode(m: String) -> void:
 	var s := world.sub
 	match m:
 		"periscope":
+			if mode in EXPOSED:
+				world.report("You're on deck. Go below first: find a hatch and press E.", "warn")
+				return
 			if s.surfaced():
 				world.report("We're on the surface. Going up to the bridge.")
-				m = "bridge"
+				go_deck("bridge")
+				return
 			elif s.depth > World.PERI_MAX:
 				world.report("Too deep for the periscope. Come up to 12 metres (R).", "warn")
 				return
@@ -223,36 +243,73 @@ func set_mode(m: String) -> void:
 				world.toggle_scope()
 				if not s.scope_up:
 					return
-		"bridge", "gun", "aa":
+		"deck", "gun", "aa":
 			if not s.surfaced():
 				world.report("The hatch is shut. We have to surface first (R until surfaced).", "warn")
 				return
-	if m in ["bridge", "gun", "aa"] and not s.surfaced():
-		return
+		"external":
+			if mode != "external":
+				prev_mode = mode
 	mode = m
 	overlay = ""
 	hud.close_station()
 	zoomed = false
-	world.station = m if m in ["bridge", "gun", "aa"] else "control"
+	if m in EXPOSED:
+		world.station = m
+	elif m != "external":
+		world.station = "control"
 	var inside := m == "interior"
 	interior.set_active(inside)
 	view.visible = not inside
+	player.enabled = inside
+	deck_player.enabled = m == "deck"
 	if inside:
 		player.cam.current = true
-		player.enabled = true
 	else:
 		world_cam.current = true
-		player.enabled = false
 	if m == "gun":
 		gun_t = s.gun_trav
 		gun_e = s.gun_elev
 		range_err = randf_range(-0.08, 0.08)
-	if m == "bridge":
-		free_yaw = 0.0
-		free_pitch = -0.04
+		deck_player.global_position = DECK_ORIGIN + deck.spots["gun"]
+	if m == "aa":
+		deck_player.global_position = DECK_ORIGIN + deck.spots["aa"]
+
+
+## Puts the player on deck at one of the deck rig's named spots.
+func go_deck(spot: String) -> void:
+	if not world.sub.surfaced():
+		world.report("The hatch is shut. We have to surface first (R until surfaced).", "warn")
+		return
+	var was_inside := mode in ["interior", "periscope"]
+	set_mode("deck")
+	if mode != "deck":
+		return
+	deck_player.global_position = DECK_ORIGIN + deck.spots[spot]
+	deck_player.velocity = Vector3.ZERO
+	if was_inside or spot.begins_with("bridge"):
+		deck_player.face(0.0, -0.04)
+
+
+## Back down inside from a hatch on deck.
+func go_below(at: Vector3) -> void:
+	set_mode("interior")
+	player.global_position = INTERIOR_ORIGIN + at
+	player.velocity = Vector3.ZERO
+
+
+## Leave the gun or AA mount and stand beside it.
+func _leave_mount() -> void:
+	var spot := "gun" if mode == "gun" else "bridge_aft"
+	var yaw := deck_player.yaw
+	go_deck(spot)
+	deck_player.face(yaw)
 
 
 func open_overlay(kind: String) -> void:
+	if world.exposed():
+		world.report("You're on deck. That station is below: find a hatch and press E.", "warn")
+		return
 	if mode != "interior":
 		set_mode("interior")
 	overlay = kind
@@ -272,8 +329,8 @@ func view_brg() -> float:
 	match mode:
 		"periscope":
 			return U.wrap360(s.hdg + s.scope_rel)
-		"bridge":
-			return U.wrap360(s.hdg - rad_to_deg(free_yaw))
+		"deck":
+			return U.wrap360(s.hdg - rad_to_deg(deck_player.yaw))
 		"gun":
 			return U.wrap360(s.hdg + s.gun_trav)
 	return s.hdg
@@ -300,10 +357,8 @@ func _mouse_move(rel: Vector2) -> void:
 			var k := scope_fov() / 32.0
 			s.scope_rel = U.wrap360(s.scope_rel + rel.x * 0.09 * k)
 			s.scope_elev = clampf(s.scope_elev - rel.y * 0.07 * k, -8.0, 60.0)
-		"bridge":
-			var k := 0.15 if zoomed else 1.0
-			free_yaw -= rel.x * 0.0025 * k
-			free_pitch = clampf(free_pitch - rel.y * 0.0025 * k, -1.2, 1.3)
+		"deck":
+			deck_player.look(rel * (0.15 if zoomed else 1.0))
 		"gun":
 			var k := 0.25 if zoomed else 1.0
 			gun_t = U.wrap360(gun_t + rel.x * 0.08 * k + 180.0) - 180.0
@@ -344,7 +399,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				close_overlay()
 			elif hud.help.visible:
 				hud.help.visible = false
-			elif mode != "interior":
+			elif mode == "external":
+				set_mode(prev_mode)
+			elif mode in ["gun", "aa"]:
+				_leave_mount()
+			elif mode == "periscope":
 				set_mode("interior")
 			else:
 				paused = true
@@ -353,7 +412,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_E:
 			if overlay != "":
 				close_overlay()
-			elif mode == "interior" and not near_station.is_empty():
+			elif mode in ["gun", "aa"]:
+				_leave_mount()
+			elif mode in ["interior", "deck"] and not near_station.is_empty():
 				_use_station(near_station["name"])
 		KEY_F1:
 			hud.help.visible = not hud.help.visible
@@ -385,9 +446,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_L:
 			_lock()
 		KEY_SPACE:
-			w.fire(1, view_brg() if mode in ["periscope", "bridge"] else -1.0)
+			w.fire(1, view_brg() if mode in ["periscope", "deck"] else -1.0)
 		KEY_X:
-			w.fire(3, view_brg() if mode in ["periscope", "bridge"] else -1.0)
+			w.fire(3, view_brg() if mode in ["periscope", "deck"] else -1.0)
 		KEY_BRACKETLEFT:
 			w.set_torp_depth(s.torp_depth - 1.0)
 		KEY_BRACKETRIGHT:
@@ -399,17 +460,29 @@ func _unhandled_input(event: InputEvent) -> void:
 				close_overlay()
 			else:
 				open_overlay("chart")
-		KEY_V:
+		KEY_V, KEY_0:
+			set_mode("external" if mode != "external" else prev_mode)
+		KEY_M:
 			sfx.toggle()
 			w.report("Sound %s." % ("on" if sfx.on else "off"))
 		KEY_1:
 			if overlay != "":
 				close_overlay()
-			set_mode("interior")
+			var here: String = prev_mode if mode == "external" else mode
+			if here in ["gun", "aa"]:
+				if mode == "external":
+					set_mode(here)
+				_leave_mount()
+			elif here == "deck":
+				if mode == "external":
+					set_mode("deck")
+				w.report("You're on deck. Walk to a hatch and press E to go below.", "warn")
+			else:
+				set_mode("interior")
 		KEY_2:
 			set_mode("periscope")
 		KEY_3:
-			set_mode("bridge")
+			go_deck("bridge")
 		KEY_4:
 			set_mode("gun")
 		KEY_5:
@@ -422,19 +495,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			open_overlay("tdc")
 		KEY_9:
 			open_overlay("damage")
-		KEY_0:
-			set_mode("external" if mode != "external" else "interior")
 
 
 func _mouse_button(ev: InputEventMouseButton) -> void:
-	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and ev.pressed:
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and ev.pressed and DisplayServer.get_name() != "headless":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		return
 	var s := world.sub
 	match ev.button_index:
 		MOUSE_BUTTON_LEFT:
 			match mode:
-				"periscope", "bridge":
+				"periscope", "deck":
 					if ev.pressed:
 						_lock()
 				"gun":
@@ -446,7 +517,7 @@ func _mouse_button(ev: InputEventMouseButton) -> void:
 					if ev.pressed and overlay == "" and not near_station.is_empty():
 						_use_station(near_station["name"])
 		MOUSE_BUTTON_RIGHT:
-			if mode in ["bridge", "gun"]:
+			if mode in ["deck", "gun"]:
 				zoomed = ev.pressed
 		MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN:
 			if not ev.pressed:
@@ -463,10 +534,10 @@ func _mouse_button(ev: InputEventMouseButton) -> void:
 func _lock() -> void:
 	if mode == "periscope":
 		world.lock_nearest(view_brg(), scope_fov())
-	elif mode == "bridge":
+	elif mode == "deck":
 		world.lock_nearest(view_brg(), 12.0 if zoomed else 40.0)
 	else:
-		world.report("Locking needs the periscope or the bridge.", "warn")
+		world.report("Locking needs the periscope or the binoculars on deck.", "warn")
 
 
 func _cycle_tc() -> void:
@@ -493,13 +564,44 @@ func _use_station(name: String) -> void:
 		"scope":
 			set_mode("periscope")
 		"ladder":
-			set_mode("bridge")
+			go_deck("bridge")
+		"hatch":
+			go_below(Interior.LADDER + Vector3(0.0, 0.0, 0.8))
+		"hatch_casing":
+			var fwd: bool = float(deck.g["hatch_z"]) < float(deck.g["tz"])
+			go_below(Vector3(0.0, 0.05, -27.0) if fwd else Vector3(0.6, 0.05, -1.0))
+		"gun":
+			set_mode("gun")
+		"aa":
+			set_mode("aa")
+		"up_aft", "up_fwd":
+			go_deck("bridge_aft" if name == "up_aft" else "bridge_fwd")
+		"down_aft":
+			go_deck("casing_aft")
+			deck_player.face(PI)
+		"down_fwd":
+			go_deck("casing_fwd")
+			deck_player.face(0.0)
 		"chart", "sonar", "tdc", "damage":
 			open_overlay(name)
 		"torpedo":
 			open_overlay("tdc")
-		"helm", "dive", "engine":
+		"helm", "dive", "engine", "maneuvering", "steering":
 			open_overlay("gauges")
+		"radio":
+			world.report(_radio_news(), "info")
+		"galley":
+			world.report("The cook pours you a mug of coffee. It is terrible, and very welcome.", "info")
+
+
+func _radio_news() -> String:
+	var tgt = null
+	for sh in world.ships:
+		if sh.kind == "target" and not sh.dead:
+			tgt = sh
+	if tgt == null:
+		return "Radio: nothing on the fox schedule. All quiet."
+	return "Radio: intelligence puts the %s somewhere near the plot. Good hunting." % tgt.name
 
 
 # ------------------------------------------------------------------ frame
@@ -529,14 +631,21 @@ func _process(delta: float) -> void:
 				hud.show_result()
 				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_cameras(dt)
+	_crew_place()
 	var cam_pos := world_cam.global_position if mode != "interior" else U.to3(w.sub.pos)
 	if view.visible:
 		view.sync(dt, cam_pos)
 	if mode == "interior":
 		interior.update(dt)
-		_station_prompt()
+		_station_prompt(interior.stations, player, INTERIOR_ORIGIN)
+	elif mode == "deck":
+		_station_prompt(deck.stations, deck_player, DECK_ORIGIN)
 	else:
+		near_station = {}
 		hud.prompt.text = ""
+	if w.awash_in >= 0.0:
+		hud.prompt.text = "DIVING!  Deck awash in %d s.  Get below!%s" % [int(ceil(w.awash_in)),
+			("    E  " + near_station["prompt"]) if not near_station.is_empty() else ""]
 	hud.update(dt)
 	_sounds()
 
@@ -579,10 +688,10 @@ func _events() -> void:
 					var d := Vector2(p.x, p.z).distance_to(w.sub.pos)
 					sfx.play("gun_far", clampf(1.2 - d / 15000.0, 0.15, 1.0) * (0.5 if mode == "interior" else 1.0), d / 343.0)
 			"clear_bridge":
-				if mode in ["bridge", "gun", "aa"]:
-					w.report("Clear the bridge! Everyone down the hatch!", "warn")
-					set_mode("interior")
-					player.global_position = INTERIOR_ORIGIN + Vector3(0.6, 0.05, 2.6)
+				w.report("Clear the bridge! Diving! Get below before the deck goes under!", "alarm")
+				sfx.play("klaxon", 1.0)
+				if mode in ["gun", "aa"]:
+					_leave_mount()
 			"dc":
 				if mode != "interior":
 					hud.overlay.flash = 0.0
@@ -620,11 +729,13 @@ func _cameras(dt: float) -> void:
 			world_cam.fov = scope_fov()
 			if y < wave - 0.3:
 				world_cam.environment = under_env
-		"bridge":
-			var eye: Vector3 = sn.get_meta("bridge_eye")
-			var b := sn.global_transform.basis * Basis.from_euler(Vector3(free_pitch, free_yaw, 0), EULER_ORDER_YXZ)
-			world_cam.global_transform = Transform3D(b, sn.global_transform * eye + shake)
-			world_cam.fov = 11.0 if zoomed else 70.0
+		"deck":
+			var dp := deck_player
+			dp.shake = w.shake
+			var eye := dp.global_position - DECK_ORIGIN + dp.head.position + dp.cam.position
+			var b := sn.global_transform.basis * Basis.from_euler(Vector3(dp.pitch, dp.yaw, 0), EULER_ORDER_YXZ)
+			world_cam.global_transform = Transform3D(b, sn.global_transform * eye + shake * 0.3)
+			world_cam.fov = 11.0 if zoomed else 72.0
 		"gun":
 			var gp: Node3D = sn.get_meta("gun_pitch")
 			var off := Vector3(-0.45, 0.25, 0.4) if zoomed else Vector3(-1.1, 0.55, 2.4)
@@ -637,8 +748,10 @@ func _cameras(dt: float) -> void:
 			world_cam.global_transform = Transform3D(ap.global_transform.basis, ap.global_transform * Vector3(0, 0.85, 1.6) + shake)
 			world_cam.fov = 68.0
 		"external":
-			var c := sn.global_position + Vector3(0, 3, 0)
-			var p := c + Vector3(sin(ext_yaw) * cos(ext_pitch), sin(ext_pitch), cos(ext_yaw) * cos(ext_pitch)) * ext_dist
+			# Third-person chase view that swings round with the boat.
+			var c := sn.global_position + Vector3(0, 4, 0)
+			var a := U.yaw(s.hdg) + ext_yaw
+			var p := c + Vector3(sin(a) * cos(ext_pitch), sin(ext_pitch), cos(a) * cos(ext_pitch)) * ext_dist
 			world_cam.global_position = p
 			world_cam.look_at(c)
 			world_cam.fov = 60.0
@@ -646,21 +759,40 @@ func _cameras(dt: float) -> void:
 				world_cam.environment = under_env
 
 
-func _station_prompt() -> void:
+## Where the player is on the boat, for the sim (who gets hit) and the figure.
+func _crew_place() -> void:
+	var w := world
+	var here: String = prev_mode if mode == "external" else mode
+	var lp := deck_player.global_position - DECK_ORIGIN
+	match here:
+		"gun":
+			lp = deck.spots["gun"]
+		"aa":
+			lp = Vector3(0, float(deck.g["aa_y"]), float(deck.g["aa_z"]))
+	w.crew_z = lp.z
+	var show_me := mode == "external" and w.exposed() and w.result != "killed"
+	var s := w.sub
+	var cam = null
+	if mode in EXPOSED:
+		cam = view.sub_node.global_transform.affine_inverse() * world_cam.global_position
+	deck.update(s.surfaced() and s.flood < 0.3, s.gun_ammo > 0, lp if show_me else null, deck_player.yaw, cam)
+
+
+func _station_prompt(list: Array, who: Player, origin: Vector3) -> void:
 	near_station = {}
 	if overlay != "":
 		hud.prompt.text = ""
 		return
-	var pp := player.global_position + Vector3(0, 1.5, 0)
-	var fwd := -player.cam.global_transform.basis.z
+	var pp := who.global_position + Vector3(0, 1.5, 0)
+	var fwd := -who.cam.global_transform.basis.z
 	var best := 1e9
-	for st in interior.stations:
-		var sp: Vector3 = interior.to_global(st["pos"])
+	for st in list:
+		var sp: Vector3 = origin + st["pos"]
 		var d := pp.distance_to(sp)
-		if d > 2.0:
+		if d > float(st.get("reach", 2.0)):
 			continue
 		var facing := fwd.dot((sp - pp).normalized())
-		if facing < 0.35:
+		if facing < (0.35 if d > 1.2 else -0.2):
 			continue
 		var score := d - facing
 		if score < best:

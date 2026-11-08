@@ -27,7 +27,7 @@ func _draw() -> void:
 	match mode:
 		"periscope":
 			_periscope(w, c, minf(sz.x, sz.y) * 0.47)
-		"bridge":
+		"deck":
 			if game.zoomed:
 				_binoculars(c, sz)
 			else:
@@ -172,7 +172,7 @@ func _binoculars(c: Vector2, sz: Vector2) -> void:
 
 
 func _bridge_info(w: World, sz: Vector2) -> void:
-	var lines := ["BRIDGE  looking %s" % U.p3(game.view_brg()), "RMB binoculars   L lock   Space fire torpedo   4 deck gun   5 AA gun"]
+	var lines := ["ON DECK  looking %s" % U.p3(game.view_brg()), "WASD walk   E use   RMB binoculars   L lock   Space fire torpedo   V outside view"]
 	var y := sz.y - 70.0
 	for ln in lines:
 		Instruments.text(self, ln, Vector2(sz.x * 0.5, y), 15, Style.TEXT, HORIZONTAL_ALIGNMENT_CENTER)
@@ -204,7 +204,7 @@ func _gun(w: World, c: Vector2, sz: Vector2) -> void:
 		["%s   %d rounds" % [g["name"], s.gun_ammo], Style.TEXT],
 		["TRAIN %s %s   ELEVATION %.1f   RANGE %d m" % [str(int(absf(s.gun_trav))), "R" if s.gun_trav >= 0 else "L", s.gun_elev, int(rng)], Style.AMBER],
 		["BLOCKED BY CONNING TOWER" if blocked else st.to_upper(), Style.ALARM if (blocked or st != "ready") else Style.GOOD],
-		["Mouse to aim   LMB fire   RMB sight   Esc or 1 to go below", Style.MUTED],
+		["Mouse to aim   LMB fire   RMB sight   E or Esc to step away from the mount", Style.MUTED],
 	]
 	if w.lock != null and w.lock.alive():
 		var r := s.pos.distance_to(w.lock.pos)
@@ -225,7 +225,7 @@ func _aa(w: World, c: Vector2, sz: Vector2) -> void:
 	var st := "READY" if w.sub.surfaced() and w.sub.crew_ready <= 0.0 else ("MANNING" if w.sub.surfaced() else "SUBMERGED")
 	var lines := [["%s   %s" % [w.nat["aa"]["name"], st], Style.TEXT],
 		["Lead the aircraft: inner ring for slow planes, outer ring for fast ones", Style.MUTED],
-		["Hold LMB to fire   Esc or 1 to go below", Style.MUTED]]
+		["Hold LMB to fire   E or Esc to step away from the mount", Style.MUTED]]
 	var y := sz.y - 90.0
 	for ln in lines:
 		Instruments.text(self, ln[0], Vector2(sz.x * 0.5, y), 16, ln[1], HORIZONTAL_ALIGNMENT_CENTER)

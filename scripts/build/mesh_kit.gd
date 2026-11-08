@@ -5,6 +5,10 @@ extends RefCounted
 
 var _tools := {}
 var mats := {}
+## Placement applied to everything drawn (rotation and translation only).
+var xf := Transform3D.IDENTITY
+## Optional Callable(world_pos: Vector3) -> Color, baked into vertex colours.
+var shade := Callable()
 
 
 func _init(materials: Dictionary = {}) -> void:
@@ -20,14 +24,19 @@ func _st(mat: String) -> SurfaceTool:
 	return st
 
 
+func _v(st: SurfaceTool, p: Vector3, n: Vector3) -> void:
+	var wp := xf * p
+	st.set_normal((xf.basis * n).normalized())
+	if shade.is_valid():
+		st.set_color(shade.call(wp))
+	st.add_vertex(wp)
+
+
 func tri(mat: String, a: Vector3, b: Vector3, c: Vector3, n: Vector3) -> void:
 	var st := _st(mat)
-	st.set_normal(n)
-	st.add_vertex(a)
-	st.set_normal(n)
-	st.add_vertex(b)
-	st.set_normal(n)
-	st.add_vertex(c)
+	_v(st, a, n)
+	_v(st, b, n)
+	_v(st, c, n)
 
 
 ## Flat quad; `inside` is any point on the inner side, used to orient the normal.
@@ -47,8 +56,42 @@ func quad_n(mat: String, a: Vector3, b: Vector3, c: Vector3, d: Vector3,
 		na: Vector3, nb: Vector3, nc: Vector3, nd: Vector3) -> void:
 	var st := _st(mat)
 	for pair in [[a, na], [b, nb], [c, nc], [a, na], [c, nc], [d, nd]]:
-		st.set_normal(pair[1])
-		st.add_vertex(pair[0])
+		_v(st, pair[0], pair[1])
+
+
+## Textured disc facing `n` (gauge faces). UVs map the disc onto the whole texture.
+func disc_uv(mat: String, c: Vector3, n: Vector3, r: float, segs := 16) -> void:
+	var st := _st(mat)
+	n = n.normalized()
+	var ref := Vector3.UP if absf(n.dot(Vector3.UP)) < 0.9 else Vector3.FORWARD
+	var u := ref.cross(n).normalized()
+	var v := n.cross(u).normalized()
+	for i in segs:
+		var a0 := TAU * i / segs
+		var a1 := TAU * (i + 1) / segs
+		for pt in [[0.0, 0.0, true], [a0, 0.0, false], [a1, 0.0, false]]:
+			var p := c
+			var uv := Vector2(0.5, 0.5)
+			if not pt[2]:
+				p = c + (u * cos(pt[0]) + v * sin(pt[0])) * r
+				uv = Vector2(0.5 + 0.5 * cos(pt[0]), 0.5 - 0.5 * sin(pt[0]))
+			st.set_uv(uv)
+			_v(st, p, n)
+
+
+## Textured rectangle: centre, normal, up direction, size, UV rectangle.
+func rect_uv(mat: String, c: Vector3, n: Vector3, up: Vector3, size: Vector2, uv := Rect2(0, 0, 1, 1)) -> void:
+	var st := _st(mat)
+	n = n.normalized()
+	var r := up.cross(n).normalized()
+	var u := n.cross(r).normalized()
+	var hx := r * size.x * 0.5
+	var hy := u * size.y * 0.5
+	var corners := [[c - hx - hy, Vector2(uv.position.x, uv.end.y)], [c + hx - hy, uv.end],
+		[c + hx + hy, Vector2(uv.end.x, uv.position.y)], [c - hx + hy, uv.position]]
+	for i in [0, 1, 2, 0, 2, 3]:
+		st.set_uv(corners[i][1])
+		_v(st, corners[i][0], n)
 
 
 ## Convex hexahedron from 8 corners: bottom face 0..3 then top face 4..7, same winding.

@@ -240,7 +240,10 @@ var ram_cool := 0.0
 var layer_depth := 60.0
 var next_plane := 1e9
 var depths: Array = []
-var station := "control"
+var station := "control"   # where the player is: control, deck, gun, aa
+var crew_z := 0.0          # player's position along the boat (local z, bow negative) when on deck
+var awash_in := -1.0       # seconds until the deck goes under with the player still on it
+var death := ""
 var _throttle := {}
 var _once := {}
 var _ids := 0
@@ -520,7 +523,7 @@ func set_depth(d: float, crash := false) -> void:
 			sound("klaxon", 0.8)
 		else:
 			report("Diving officer: make my depth %d metres." % int(d))
-	if d > 0.0 and s.flood < 0.5 and station in ["bridge", "gun", "aa"]:
+	if d > 0.0 and s.flood < 0.5 and exposed():
 		emit({"type": "clear_bridge"})
 
 
@@ -942,9 +945,45 @@ func _update_sub(dt: float) -> void:
 			s.sys[k] = minf(100.0, s.sys[k] + 0.3 * dt * work)
 			if before <= 25.0 and s.sys[k] > 25.0:
 				report("Damage control: %s repaired." % SYS_NAMES[k].to_lower(), "good")
+	# Anyone still on deck when she goes under is left behind.
+	awash_in = -1.0
+	if exposed() and result == "":
+		if s.flood >= 0.55:
+			kill_player("drowned", "The sea closed over the deck before you reached the hatch.")
+		elif s.dep_ord > 0.0:
+			var dt_f2: float = float(N["dive_time"]) * (0.65 if s.crash else 1.0)
+			awash_in = (0.55 - s.flood) * dt_f2
 	s.crew_ready = maxf(0.0, s.crew_ready - dt)
 	s.gun_reload = maxf(0.0, s.gun_reload - dt)
 	s.aa_reload = maxf(0.0, s.aa_reload - dt)
+
+
+func exposed() -> bool:
+	return station in ["deck", "gun", "aa"]
+
+
+func crew_pos() -> Vector2:
+	return sub.pos + U.dirv(sub.hdg) * (-crew_z)
+
+
+## The player is the captain: if he is killed the patrol is over.
+func kill_player(kind: String, how: String) -> void:
+	if result != "":
+		return
+	death = how
+	report(how, "alarm")
+	report("The captain is down!", "alarm")
+	shake = 1.0
+	_end(kind, 2.5)
+
+
+## A blast at p2 on the surface; lethal close in, a chance of a fatal wound further out.
+func _blast_crew(p2: Vector2, lethal: float, danger: float, how: String) -> void:
+	if not exposed() or not sub.surfaced():
+		return
+	var d := p2.distance_to(crew_pos())
+	if d < lethal or (d < danger and randf() < (danger - d) / (danger - lethal) * 0.55):
+		kill_player("killed", how)
 
 
 func damage_sub(amount: float, cause: String) -> void:
@@ -1333,7 +1372,8 @@ func _shell_impact(sh: Shell) -> void:
 				emit({"type": "boom", "pos": Vector3(p2.x, 2.0, p2.y), "size": 3.0, "kind": "shell_hit"})
 				sound("hull_hit", 1.0)
 				damage_sub(float(sh.dmg) * randf_range(0.7, 1.3), "Hit! A shell struck the casing!")
-				if station in ["bridge", "gun", "aa"]:
+				_blast_crew(p2, 6.0 + float(sh.cal) / 40.0, 16.0 + float(sh.cal) / 15.0, "A shell burst on the casing beside you.")
+				if exposed():
 					s.crew_ready = maxf(s.crew_ready, 12.0)
 					report("Men down on deck! The gun crew is hit!", "alarm")
 				return
@@ -1345,12 +1385,14 @@ func _shell_impact(sh: Shell) -> void:
 			if d.length() < 18.0 and s.surfaced():
 				shake = maxf(shake, 0.6)
 				damage_sub(2.0, "")
+			_blast_crew(p2, 3.0, 4.0 + float(sh.cal) / 25.0, "Shell splinters from a near miss swept the deck.")
 			emit({"type": "splash", "pos": Vector3(p2.x, 0.0, p2.y), "size": clampf(float(sh.cal) / 30.0, 2.0, 14.0)})
 			sound("splash_near" if d.length() < 300.0 else "splash", 0.7, sh.p)
 		"gun":
 			emit({"type": "splash", "pos": Vector3(p2.x, 0.0, p2.y), "size": clampf(float(sh.cal) / 30.0, 2.5, 6.0)})
 		"bomb":
 			var d := p2.distance_to(s.pos)
+			_blast_crew(p2, 16.0, 38.0, "A bomb burst right beside you on deck.")
 			if s.surfaced() and d < 14.0:
 				shake = 1.0
 				emit({"type": "boom", "pos": Vector3(p2.x, 2.0, p2.y), "size": 6.0, "kind": "bomb"})
@@ -1528,8 +1570,13 @@ func _strafe(p: Aircraft, r: float) -> void:
 	sound("mg", 0.7)
 	if r < 800.0 and s.surfaced():
 		s.hull = maxf(0.0, s.hull - 0.8)
-		if station in ["bridge", "gun", "aa"]:
+		if exposed():
 			s.crew_ready = maxf(s.crew_ready, 6.0)
+			var cp := crew_pos()
+			var a3 := Vector3(start.x, 0, start.y)
+			var b3 := Vector3(end.x, 0, end.y)
+			if _seg_dist(a3, b3, Vector3(cp.x, 0, cp.y)) < 2.5 and randf() < 0.5:
+				kill_player("killed", "A burst of aircraft fire cut you down on deck.")
 		report("We're being strafed! Bullets are ripping across the deck!", "alarm", "strafe", 8.0)
 
 

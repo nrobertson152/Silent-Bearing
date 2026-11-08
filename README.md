@@ -60,37 +60,61 @@ You start at periscope depth with the target over the horizon, somewhere ahead.
 ### On the surface
 
 Order the boat up with `R` until you surface. The diesels start and the battery charges.
-Climb the ladder in the control room or press `3` for the bridge, `4` for the deck gun,
-`5` for the AA gun. Surfacing is dangerous: warships open fire and bracket you with
-each salvo until you change course or speed, and aircraft spot surfaced boats from far
-away. When the lookouts call aircraft, dive. Diving takes time (27 seconds for a Type
-VII, nearly a minute for an I-boat), and everyone on deck has to clear the bridge.
+Climb the ladder in the control room (or press `3`) to come out on the bridge. From
+there you can walk the whole deck: climb down the ladders at the back of the conning
+tower, walk to the deck gun and press `E` to man it, then aim with the mouse and fire
+with the left button (right button for the sight). `E` or `Esc` steps you back off the
+gun. The AA gun is manned the same way from the back of the bridge. `4` and `5` jump
+straight to the guns.
+
+Surfacing is dangerous: warships open fire and bracket you with each salvo until you
+change course or speed, and aircraft spot surfaced boats from far away, then bomb and
+strafe. **You are the captain, and if you die the patrol is over.** A bomb or shell
+bursting close to you, or a strafing run across your part of the deck, can kill you.
+When the lookouts call aircraft, dive, but get yourself below first: walk to the
+conning tower hatch on the bridge (or the deck hatch near the gun) and press `E`.
+Diving takes time (27 seconds for a Type VII, nearly a minute for an I-boat), a
+countdown shows how long until the deck goes under, and anyone still up there drowns.
+
+Press `V` at any time for a third-person view that follows the boat. Drag the mouse
+to swing around her and use the wheel to zoom.
+
+### Inside the boat
+
+The whole pressure hull is walkable, bow to stern, through the oval watertight doors:
+forward torpedo room, officers' country with the wardroom and radio room, control room,
+galley, mess and crew berthing, the two engine rooms, the maneuvering room and the after
+torpedo room (steering gear on the boats without stern tubes). The planesmen and
+helmsman turn their wheels as the boat answers, torpedoes slide into the tubes while
+reloading, the diesels clatter on the surface, and the lights go red at night or when
+she's badly hurt.
 
 ### Controls
 
 | Key | Action |
 | --- | --- |
-| `W A S D`, `Shift` | Walk around inside the boat |
+| `W A S D`, `Shift` | Walk around inside the boat or on deck |
 | Mouse | Look, train the periscope, aim the guns |
-| `E` or left click | Use the station you're facing |
-| `1` to `5` | Control room, periscope, bridge, deck gun, AA gun |
-| `6` to `0` | Plot table, hydrophones, TDC, damage board, outside view |
+| `E` | Use the station, ladder or hatch you're facing; step off a gun |
+| `1` to `5` | Control room, periscope, go on deck, deck gun, AA gun |
+| `6` to `9` | Plot table, hydrophones, TDC, damage board |
+| `V` or `0` | Third-person view of the boat |
 | `Up` / `Down` | Engine telegraph |
 | `Left` / `Right` | Rudder |
 | `R` / `F` | Order shallower / deeper (all the way up surfaces) |
 | `C` | Crash dive |
 | `P` | Raise or lower the periscope |
 | `Z`, mouse wheel | Periscope power |
-| `L`, left click | Lock target (periscope or bridge) |
+| `L`, left click | Lock target (periscope or binoculars on deck) |
 | `Space` / `X` | Fire one torpedo / a spread of three |
 | `[` `]` | Torpedo running depth |
 | Left / right mouse | Fire / gun sight or binoculars |
 | `T` | Time compression 1x, 4x, 16x |
 | `Tab` | Plot table |
-| `V` | Sound on or off |
+| `M` | Sound on or off |
 | `F1` | Help |
 | `F11` | Fullscreen |
-| `Esc` | Leave a station, go below, or pause |
+| `Esc` | Leave a station or pause |
 
 ## What's simulated
 
@@ -131,13 +155,14 @@ scripts/
   sim/world.gd             the simulation: no rendering, fully testable
   build/                   procedural models: warships, your boat, aircraft, crew, islands
   view/                    ocean, sky, effects and the 3D world
-  interior/                walkable interior and the first-person player
+  interior/                walkable eight-compartment interior, its textures and props, the player
+  deck/                    walkable deck, bridge and hatches; lookouts and gun crew
   ui/                      HUD, sights, live instruments, menus
   audio/sfx.gd             procedurally synthesised sound
   game.gd                  modes, cameras, input and the game loop
 shaders/                   ocean and sky
 tests/run_tests.gd         headless simulation tests
-tools/                     screenshot tools for models and scenes
+tools/                     screenshot tools, plus walk and deck tests
 ```
 
 Every model, sound and texture is generated in code, so there are no binary assets.
@@ -149,6 +174,8 @@ funnels and masts along the hull. Adding a ship is one entry there.
 ```bash
 godot --headless --path . --import
 godot --headless --path . -s tests/run_tests.gd
+godot --headless --path . -s tools/walk_test.gd -- us shokaku
+godot --headless --path . -s tools/deck_test.gd -- - us shokaku
 ```
 
 ### Rendering previews
@@ -156,6 +183,7 @@ godot --headless --path . -s tests/run_tests.gd
 ```bash
 xvfb-run godot --path . --rendering-driver opengl3 -s tools/model_preview.gd -- /tmp/out
 xvfb-run godot --path . --rendering-driver opengl3 -s tools/game_preview.gd -- /tmp/out de barham
+xvfb-run godot --path . --rendering-driver opengl3 -s tools/interior_preview.gd -- /tmp/out us shokaku
 ```
 
 ## License

@@ -126,7 +126,9 @@ static func build(nat: Dictionary) -> Node3D:
 		Vector3(0.05, deck_y + th - 0.3, tz - tl * 0.48), Vector3(-0.05, deck_y + th - 0.3, tz - tl * 0.48)])
 	# Open bridge: bulwark lip, cockpit floor and a windscreen.
 	var by := deck_y + th
-	k.block("black", 0, tz, by - 1.2, by - 1.15, tw * 0.75, tl * 0.65, tw * 0.75, tl * 0.65)
+	k.block("deck", 0, tz - tl * 0.01, by - 0.2, by - 0.1, tw * 0.84, tl * 0.78, tw * 0.84, tl * 0.78)
+	k.cyl("metal", Vector3(0, by - 0.1, tz - tl * 0.08), Vector3(0, by - 0.02, tz - tl * 0.08), 0.42, 0.42, 14)
+	k.cyl("black", Vector3(0, by - 0.02, tz - tl * 0.08), Vector3(0, by, tz - tl * 0.08), 0.32, 0.32, 14)
 	k.box("hull", Vector3(0, by + 0.45, tz - tl * 0.40), Vector3(tw * 0.86, 0.9, 0.12))
 	for s in [-1.0, 1.0]:
 		k.box("hull", Vector3(s * tw * 0.42, by + 0.45, tz - tl * 0.05), Vector3(0.12, 0.9, tl * 0.72))
@@ -152,6 +154,45 @@ static func build(nat: Dictionary) -> Node3D:
 	var ttop := Vector3(0, by + 3.0, pz)
 	k.cyl("black", bow, ttop, 0.03, 0.03, 3, false)
 	k.cyl("black", ttop, Vector3(0, deck_y + 0.6, L * 0.47), 0.03, 0.03, 3, false)
+
+	# Lifelines along the casing: stanchions and two wires each side.
+	var tz0 := tz - tl * 0.62
+	var tz1 := tz + tl * 0.5
+	for side in [-1.0, 1.0]:
+		var zz := -L * 0.3
+		var prev := Vector3.INF
+		while zz < L * 0.36:
+			var u := zz / L + 0.5
+			var f := 1.0
+			if u < 0.2:
+				f = 0.25 + 0.75 * (u / 0.2)
+			elif u > 0.8:
+				f = 1.0 - (u - 0.8) / 0.2 * 0.7
+			var x: float = side * (dw * 0.5 * f - 0.12)
+			var base := Vector3(x, deck_y, zz)
+			if zz > tz0 - 0.5 and zz < tz1 + 0.5:
+				prev = Vector3.INF
+			else:
+				k.cyl("metal", base, base + Vector3(0, 1.05, 0), 0.025, 0.02, 4, false)
+				if prev != Vector3.INF:
+					for hy in [0.5, 1.0]:
+						k.cyl("black", prev + Vector3(0, hy, 0), base + Vector3(0, hy, 0), 0.01, 0.01, 3, false)
+				prev = base
+			zz += 2.2
+	# Rungs up the after face of the tower and the forward fairing.
+	var ry := deck_y + 0.3
+	while ry < by - 0.2:
+		k.cyl("metal", Vector3(-0.22, ry, tz1 + 0.06), Vector3(0.22, ry, tz1 + 0.06), 0.02, 0.02, 4, false)
+		if style != "b1":
+			var fz := lerpf(tz - tl * 0.62, tz - tl * 0.48, (ry - deck_y) / th) - 0.06
+			k.cyl("metal", Vector3(-0.22, ry, fz), Vector3(0.22, ry, fz), 0.02, 0.02, 4, false)
+		ry += 0.32
+	# Deck access hatch near the gun, on the side away from the tower.
+	var gz0 := (0.5 - float(sd["gun_x"])) * -L
+	var hz := gz0 + (2.6 if gz0 > tz else -2.6)
+	k.cyl("metal", Vector3(0, deck_y, hz), Vector3(0, deck_y + 0.12, hz), 0.42, 0.42, 14)
+	k.cyl("black", Vector3(0, deck_y + 0.12, hz), Vector3(0, deck_y + 0.13, hz), 0.32, 0.32, 14)
+	k.box("metal", Vector3(0.28, deck_y + 0.16, hz), Vector3(0.18, 0.06, 0.05))
 
 	# I-boat hangar and catapult.
 	if style == "b1":
@@ -194,6 +235,8 @@ static func build(nat: Dictionary) -> Node3D:
 	root.set_meta("bridge_eye", Vector3(0, by + 1.5, tz - tl * 0.22))
 	root.set_meta("scope_head", Vector3(0, by + 3.4, pz))
 	root.set_meta("deck_y", deck_y)
+	root.set_meta("deck_geo", {"L": L, "deck_y": deck_y, "dw": dw, "tz": tz, "tl": tl, "tw": tw, "th": th, "by": by,
+		"gun_z": gz, "aa_z": az, "aa_y": aa_y, "pz": pz, "hatch_z": hz, "style": style})
 	return root
 
 

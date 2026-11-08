@@ -146,7 +146,7 @@ func _process(_dt: float) -> bool:
 			game.set_mode("interior")
 			wait = 3
 		"bridge":
-			game.set_mode("bridge")
+			game.go_deck("bridge")
 			game.free_yaw = -deg_to_rad(U.adiff(U.brg(w.sub.pos, w.target.pos), w.sub.hdg))
 			wait = 8
 			steps.pop_front()

@@ -162,6 +162,8 @@ func show_result() -> void:
 		"lost": ["LOST WITH ALL HANDS", "The enemy broke your hull.", Style.ALARM],
 		"crushed": ["CRUSH DEPTH", "The pressure hull gave way below %d metres." % int(w.nat["crush"]), Style.ALARM],
 		"escaped": ["TARGET ESCAPED", "%s outran you and slipped away." % tg.name, Style.AMBER],
+		"killed": ["CAPTAIN KILLED", "%s Without you the patrol is over." % w.death, Style.ALARM],
+		"drowned": ["LOST OVERBOARD", "%s The boat dived without you." % w.death, Style.ALARM],
 		"dry": ["OUT OF TORPEDOES", "Every tube is empty and %s is still afloat." % tg.short, Style.AMBER],
 	}
 	var h: Array = heads.get(w.result, ["PATROL OVER", "", Style.TEXT])

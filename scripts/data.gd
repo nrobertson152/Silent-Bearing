@@ -140,27 +140,28 @@ static func _t(id: String, name: String, nation: String, type: String, length: f
 
 
 const HELP := [
-	["W A S D, Shift", "Walk around inside the boat"],
+	["W A S D, Shift", "Walk around inside the boat or on deck"],
 	["Mouse", "Look, train the periscope, aim the guns"],
-	["E", "Use the station you're facing"],
-	["1  2  3  4  5", "Control room, periscope, bridge, deck gun, AA gun"],
-	["6  7  8  9  0", "Plot table, hydrophones, TDC, damage board, outside view"],
+	["E", "Use the station, ladder or hatch you're facing; leave a gun"],
+	["1  2  3  4  5", "Control room, periscope, go on deck, deck gun, AA gun"],
+	["6  7  8  9", "Plot table, hydrophones, TDC, damage board"],
+	["V or 0", "Third-person view of the boat (drag the mouse, wheel to zoom)"],
 	["Up / Down", "Engine telegraph"],
 	["Left / Right", "Rudder"],
 	["R / F", "Order shallower / deeper (all the way up surfaces)"],
-	["C", "Crash dive"],
+	["C", "Crash dive. Get below first: anyone on deck drowns"],
 	["P", "Raise or lower the periscope"],
 	["Z, mouse wheel", "Periscope power"],
-	["L, left click", "Lock target on the TDC (periscope or bridge)"],
+	["L, left click", "Lock target on the TDC (periscope or binoculars)"],
 	["Space / X", "Fire one torpedo / a spread of three"],
 	["[  ]", "Torpedo running depth"],
 	["Left / right mouse", "Fire / aim through the sight (guns, binoculars)"],
 	["T", "Time compression 1x, 4x, 16x"],
 	["Tab", "Plot table"],
-	["V", "Sound on or off"],
+	["M", "Sound on or off"],
 	["F1", "Show or hide this help"],
 	["F11", "Fullscreen"],
-	["Esc", "Leave a station, go below, or pause"],
+	["Esc", "Leave a station or pause"],
 ]
 
 const NATION_ORDER := ["us", "uk", "de", "jp"]

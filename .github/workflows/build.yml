@@ -34,6 +34,18 @@ jobs:
           if grep -q "SCRIPT ERROR" smoke.log || ! grep -q "SMOKE OK" smoke.log; then
             echo "::error::The game failed to start a patrol"; exit 1
           fi
+      - name: Walk through every watertight door
+        run: |
+          for n in "us shokaku" "uk tirpitz" "de hood" "jp yorktown"; do
+            ./godot --headless --path . -s tools/walk_test.gd -- $n 2>&1 | tee -a walk.log
+          done
+          if grep -q "SCRIPT ERROR\|WALK .* FAIL" walk.log; then exit 1; fi
+      - name: Deck, deck gun, outside view and dying on deck
+        run: |
+          for n in "us shokaku" "uk tirpitz" "de hood" "jp yorktown"; do
+            ./godot --headless --path . -s tools/deck_test.gd -- - $n 2>&1 | tee -a deck.log
+          done
+          if grep -q "SCRIPT ERROR\|DECK FAIL\|DECK .* FAIL" deck.log; then exit 1; fi
 
   export:
     needs: test

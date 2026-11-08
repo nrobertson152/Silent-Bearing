@@ -1,7 +1,13 @@
-class_name Hud
 extends CanvasLayer
 ## In-patrol interface: status bar, crew reports, interaction prompts, the
 ## sights overlay, station panels, help, pause and the end-of-patrol report.
+
+const GameData := preload("res://scripts/data.gd")
+const Instruments := preload("res://scripts/ui/instruments.gd")
+const Style := preload("res://scripts/ui/style.gd")
+const U := preload("res://scripts/util.gd")
+const ViewOverlay := preload("res://scripts/ui/view_overlay.gd")
+const World := preload("res://scripts/sim/world.gd")
 
 var game
 var root: Control
@@ -113,7 +119,7 @@ func _help_panel() -> PanelContainer:
 	g.add_theme_constant_override("h_separation", 28)
 	g.add_theme_constant_override("v_separation", 4)
 	p.add_child(g)
-	for row in Game.HELP:
+	for row in GameData.HELP:
 		g.add_child(Style.label(row[0], 15, Style.AMBER))
 		g.add_child(Style.label(row[1], 15, Style.TEXT))
 	return p

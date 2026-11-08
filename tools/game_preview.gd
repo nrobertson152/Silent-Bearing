@@ -2,6 +2,10 @@ extends SceneTree
 ## Drives the real game through its screens and saves screenshots.
 ## xvfb-run godot --path . --rendering-driver opengl3 -s tools/game_preview.gd -- <out_dir> <nation> <target>
 
+const Game := preload("res://scripts/game.gd")
+const U := preload("res://scripts/util.gd")
+const World := preload("res://scripts/sim/world.gd")
+
 var game: Game
 var frame := 0
 var out_dir := "."

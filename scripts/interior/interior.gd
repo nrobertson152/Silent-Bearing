@@ -1,4 +1,3 @@
-class_name Interior
 extends Node3D
 ## The inside of the boat: torpedo room, control room and engine room, with
 ## working stations, live instrument panels, moving controls, crew, lighting
@@ -6,6 +5,12 @@ extends Node3D
 ##
 ## Local space: bow toward -Z, deck plates at y = 0. Everything here renders
 ## on visual layer 2 so the outside sun and sky never touch it.
+
+const CrewBuilder := preload("res://scripts/build/crew_builder.gd")
+const Fx := preload("res://scripts/view/fx.gd")
+const Instruments := preload("res://scripts/ui/instruments.gd")
+const MeshKit := preload("res://scripts/build/mesh_kit.gd")
+const World := preload("res://scripts/sim/world.gd")
 
 const R := 2.55
 const CY := 1.45

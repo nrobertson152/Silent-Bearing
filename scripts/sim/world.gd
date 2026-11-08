@@ -1,4 +1,3 @@
-class_name World
 extends RefCounted
 ## The whole battle: your boat, the target, escorts, sub-chasers, aircraft,
 ## torpedoes, depth charges, shells and bombs. No rendering in here, so the
@@ -6,6 +5,9 @@ extends RefCounted
 ##
 ## Sim space: Vector2(x east, y north) in metres. 3D sim vectors are
 ## Vector3(x, altitude, north). U.to3() converts to Godot space.
+
+const GameData := preload("res://scripts/data.gd")
+const U := preload("res://scripts/util.gd")
 
 const PERI_MAX := 14.5
 const FIRE_MAX := 40.0

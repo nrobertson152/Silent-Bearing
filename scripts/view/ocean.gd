@@ -1,4 +1,3 @@
-class_name Ocean
 extends Node3D
 ## Near wave grid that follows the camera, plus a flat ring out to the horizon.
 

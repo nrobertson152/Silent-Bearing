@@ -1,5 +1,6 @@
-class_name Style
 ## Shared colours, theme and small widget helpers for the control-room UI.
+
+const BadgeDraw := preload("res://scripts/ui/badge_draw.gd")
 
 const HULL := Color(0.07, 0.085, 0.09)
 const PLATE := Color(0.12, 0.145, 0.155)

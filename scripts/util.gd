@@ -1,4 +1,3 @@
-class_name U
 ## Math helpers. Simulation space is metres with x east and y north. Bearings
 ## and headings are degrees clockwise from north. Godot space maps north to -Z.
 

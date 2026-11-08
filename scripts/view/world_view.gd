@@ -1,7 +1,16 @@
-class_name WorldView
 extends Node3D
 ## The outside world: sky, light, ocean, islands, every ship, aircraft and
 ## projectile, plus their smoke, wakes and fires. Reads World each frame.
+
+const Fx := preload("res://scripts/view/fx.gd")
+const IslandBuilder := preload("res://scripts/build/island_builder.gd")
+const MeshKit := preload("res://scripts/build/mesh_kit.gd")
+const Ocean := preload("res://scripts/view/ocean.gd")
+const PlaneBuilder := preload("res://scripts/build/plane_builder.gd")
+const ShipBuilder := preload("res://scripts/build/ship_builder.gd")
+const SubBuilder := preload("res://scripts/build/sub_builder.gd")
+const U := preload("res://scripts/util.gd")
+const World := preload("res://scripts/sim/world.gd")
 
 const PAL := {
 	"day": {"top": Color(0.28, 0.46, 0.66), "hor": Color(0.68, 0.75, 0.79), "ground": Color(0.12, 0.17, 0.19),

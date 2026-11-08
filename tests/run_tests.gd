@@ -1,6 +1,10 @@
 extends SceneTree
 ## Headless simulation tests: godot --headless --path . -s tests/run_tests.gd
 
+const GameData := preload("res://scripts/data.gd")
+const U := preload("res://scripts/util.gd")
+const World := preload("res://scripts/sim/world.gd")
+
 var failures := 0
 
 

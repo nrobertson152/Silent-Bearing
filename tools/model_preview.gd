@@ -2,6 +2,12 @@ extends SceneTree
 ## Renders the ship, boat and aircraft models to PNG files for a quick look.
 ## xvfb-run godot --path . --rendering-driver opengl3 -s tools/model_preview.gd -- <out_dir> [layout]
 
+const GameData := preload("res://scripts/data.gd")
+const MeshKit := preload("res://scripts/build/mesh_kit.gd")
+const PlaneBuilder := preload("res://scripts/build/plane_builder.gd")
+const ShipBuilder := preload("res://scripts/build/ship_builder.gd")
+const SubBuilder := preload("res://scripts/build/sub_builder.gd")
+
 var out_dir := "user://"
 var frame := 0
 var shots := []

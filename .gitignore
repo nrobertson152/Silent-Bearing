@@ -1,6 +1,6 @@
 # Godot
 .godot/
-build/
+/build/
 export_credentials.cfg
 
 # Editors and OS

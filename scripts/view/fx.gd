@@ -1,4 +1,3 @@
-class_name Fx
 extends Node3D
 ## Short-lived effects: shell splashes, depth-charge eruptions, explosions,
 ## muzzle flashes, strafing lines and hit sparks. Positions are Godot space.

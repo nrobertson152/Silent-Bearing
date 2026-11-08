@@ -1,6 +1,8 @@
-class_name Menu
 extends CanvasLayer
 ## Main menu: pick a navy, pick a famous warship, read the orders, sail.
+
+const GameData := preload("res://scripts/data.gd")
+const Style := preload("res://scripts/ui/style.gd")
 
 var game
 var root: Control
@@ -232,7 +234,7 @@ func _brief() -> void:
 	var cg := GridContainer.new()
 	cg.columns = 2
 	cg.add_theme_constant_override("h_separation", 16)
-	for row in Game.HELP:
+	for row in GameData.HELP:
 		cg.add_child(Style.label(row[0], 13, Style.AMBER))
 		cg.add_child(Style.label(row[1], 13, Style.TEXT))
 	right.add_child(cg)

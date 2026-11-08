@@ -1,4 +1,3 @@
-class_name Sfx
 extends Node
 ## Every sound is synthesised at startup, so the game ships no audio files.
 ## Distant sounds can be delayed by their travel time through the air.

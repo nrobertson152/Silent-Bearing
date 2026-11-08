@@ -27,6 +27,13 @@ jobs:
         run: ./godot --headless --path . --import || true
       - name: Run simulation tests
         run: ./godot --headless --path . -s tests/run_tests.gd
+      - name: Launch a patrol (catches missing files and script errors)
+        run: |
+          rm -rf .godot
+          ./godot --headless --path . -- --autostart us shokaku --smoke 8 2>&1 | tee smoke.log
+          if grep -q "SCRIPT ERROR" smoke.log || ! grep -q "SMOKE OK" smoke.log; then
+            echo "::error::The game failed to start a patrol"; exit 1
+          fi
 
   export:
     needs: test

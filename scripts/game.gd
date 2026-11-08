@@ -1,33 +1,19 @@
-class_name Game
 extends Node
 ## Runs the whole game: menus, the patrol, camera modes (walking inside the
 ## boat, periscope, bridge, deck gun, AA gun, outside view), input, stations
 ## and sound.
 
+const GameData := preload("res://scripts/data.gd")
+const Hud := preload("res://scripts/ui/hud.gd")
+const Interior := preload("res://scripts/interior/interior.gd")
+const Menu := preload("res://scripts/ui/menu.gd")
+const Player := preload("res://scripts/interior/player.gd")
+const Sfx := preload("res://scripts/audio/sfx.gd")
+const U := preload("res://scripts/util.gd")
+const World := preload("res://scripts/sim/world.gd")
+const WorldView := preload("res://scripts/view/world_view.gd")
+
 const INTERIOR_ORIGIN := Vector3(0, -6000, 0)
-const HELP := [
-	["W A S D, Shift", "Walk around inside the boat"],
-	["Mouse", "Look, train the periscope, aim the guns"],
-	["E", "Use the station you're facing"],
-	["1  2  3  4  5", "Control room, periscope, bridge, deck gun, AA gun"],
-	["6  7  8  9  0", "Plot table, hydrophones, TDC, damage board, outside view"],
-	["Up / Down", "Engine telegraph"],
-	["Left / Right", "Rudder"],
-	["R / F", "Order shallower / deeper (all the way up surfaces)"],
-	["C", "Crash dive"],
-	["P", "Raise or lower the periscope"],
-	["Z, mouse wheel", "Periscope power"],
-	["L, left click", "Lock target on the TDC (periscope or bridge)"],
-	["Space / X", "Fire one torpedo / a spread of three"],
-	["[  ]", "Torpedo running depth"],
-	["Left / right mouse", "Fire / aim through the sight (guns, binoculars)"],
-	["T", "Time compression 1x, 4x, 16x"],
-	["Tab", "Plot table"],
-	["V", "Sound on or off"],
-	["F1", "Show or hide this help"],
-	["F11", "Fullscreen"],
-	["Esc", "Leave a station, go below, or pause"],
-]
 const STATION_TITLES := {"chart": "Plot table", "sonar": "Hydrophones", "tdc": "Torpedo data computer",
 	"damage": "Damage control", "gauges": "Control room gauges"}
 
@@ -101,6 +87,12 @@ func _ready() -> void:
 		var nid: String = args[i + 1] if args.size() > i + 1 else "us"
 		var tid: String = args[i + 2] if args.size() > i + 2 else "shokaku"
 		start_mission.call_deferred(nid, tid)
+	# CI smoke test: -- --smoke 8  runs for N seconds, then quits with code 0.
+	var k := args.find("--smoke")
+	if k >= 0 and args.size() > k + 1:
+		get_tree().create_timer(float(args[k + 1])).timeout.connect(func():
+			print("SMOKE OK mode=", mode, " t=", world.t if world else -1.0)
+			get_tree().quit(0))
 	# Debug helper: -- --shot /path/out.png 20  saves a screenshot after N seconds and quits.
 	var j := args.find("--shot")
 	if j >= 0 and args.size() > j + 2:

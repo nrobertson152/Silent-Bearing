@@ -1,4 +1,3 @@
-class_name BadgeDraw
 extends Control
 ## Period national markings, drawn rather than imported.
 
@@ -32,4 +31,4 @@ func _draw() -> void:
 		"jp":
 			draw_circle(c, r, Color(0.93, 0.93, 0.9))
 			draw_circle(c, r * 0.6, Color(0.74, 0.13, 0.16))
-	draw_arc(c, r, 0, TAU, 48, Style.BRASS, 2.0)
+	draw_arc(c, r, 0, TAU, 48, Color(0.79, 0.65, 0.36), 2.0)

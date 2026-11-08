@@ -1,4 +1,3 @@
-class_name Player
 extends CharacterBody3D
 ## First-person walking inside the boat. The camera rolls and pitches with
 ## the hull and jolts when depth charges go off.

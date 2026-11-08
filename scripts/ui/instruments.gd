@@ -1,8 +1,10 @@
-class_name Instruments
 extends Control
 ## Live instrument faces drawn with the 2D canvas. The same control works as
 ## a full-screen station overlay and inside a SubViewport textured onto the
 ## 3D panels in the control room.
+
+const U := preload("res://scripts/util.gd")
+const World := preload("res://scripts/sim/world.gd")
 
 const PHOS := Color(0.56, 0.86, 0.66)
 const AMBER := Color(0.94, 0.71, 0.30)

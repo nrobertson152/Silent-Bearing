@@ -1,7 +1,11 @@
-class_name ViewOverlay
 extends Control
 ## Lens masks and sights drawn over the 3D view: periscope reticle and
 ## bearing tape, binoculars, the deck gun's layer sight and the AA ring sight.
+
+const Instruments := preload("res://scripts/ui/instruments.gd")
+const Style := preload("res://scripts/ui/style.gd")
+const U := preload("res://scripts/util.gd")
+const World := preload("res://scripts/sim/world.gd")
 
 var game
 var flash := 0.0

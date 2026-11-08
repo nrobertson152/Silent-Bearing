@@ -1,4 +1,3 @@
-class_name GameData
 ## Navies, player boats, torpedoes, deck guns, aircraft and the target warships.
 ##
 ## Figures are rounded from published wartime specifications and adjusted for
@@ -139,6 +138,30 @@ static func _t(id: String, name: String, nation: String, type: String, length: f
 		"historical": historical, "credit": credit, "note": note, "air": air, "layout": layout,
 		"terrain": terrain}
 
+
+const HELP := [
+	["W A S D, Shift", "Walk around inside the boat"],
+	["Mouse", "Look, train the periscope, aim the guns"],
+	["E", "Use the station you're facing"],
+	["1  2  3  4  5", "Control room, periscope, bridge, deck gun, AA gun"],
+	["6  7  8  9  0", "Plot table, hydrophones, TDC, damage board, outside view"],
+	["Up / Down", "Engine telegraph"],
+	["Left / Right", "Rudder"],
+	["R / F", "Order shallower / deeper (all the way up surfaces)"],
+	["C", "Crash dive"],
+	["P", "Raise or lower the periscope"],
+	["Z, mouse wheel", "Periscope power"],
+	["L, left click", "Lock target on the TDC (periscope or bridge)"],
+	["Space / X", "Fire one torpedo / a spread of three"],
+	["[  ]", "Torpedo running depth"],
+	["Left / right mouse", "Fire / aim through the sight (guns, binoculars)"],
+	["T", "Time compression 1x, 4x, 16x"],
+	["Tab", "Plot table"],
+	["V", "Sound on or off"],
+	["F1", "Show or hide this help"],
+	["F11", "Fullscreen"],
+	["Esc", "Leave a station, go below, or pause"],
+]
 
 const NATION_ORDER := ["us", "uk", "de", "jp"]
 

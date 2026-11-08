@@ -1,8 +1,9 @@
-__pycache__/
-*.pyc
-.venv/
-venv/
+# Godot
+.godot/
 build/
-dist/
-*.spec
-.pytest_cache/
+export_credentials.cfg
+
+# Editors and OS
+.vscode/
+*.swp
+.DS_Store

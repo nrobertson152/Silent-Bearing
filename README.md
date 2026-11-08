@@ -1,116 +1,162 @@
 # Silent Bearing
 
-A free and open source WWII submarine game. You command from inside the boat: work the
-periscope, listen on the hydrophones, plot the target, then slip past the escorts and
-sink a famous warship.
+A free and open source WWII submarine game built with [Godot 4](https://godotengine.org).
+You command from inside the boat: walk the control room, raise the periscope, plot the
+target, fire a spread, then dive away from the destroyers, sub-chasers and aircraft
+hunting you. Surface to charge your batteries, man the deck gun or fight off planes
+with the AA gun, if you dare.
 
-Pick a navy (United States, United Kingdom, Germany or Japan), each with its own boat
-and torpedo, and go after one of twenty real warships. Most are the actual submarine
-kills of the war, like *Shinano*, *Royal Oak*, *Ark Royal* and *Indianapolis*. A few are
-what-ifs, like *Yamato* and *Tirpitz*.
+Pick a navy (United States, United Kingdom, Germany or Japan), each with its own boat,
+torpedo and deck gun, and go after one of twenty famous warships. Most are the real
+submarine kills of the war, like *Shinano*, *Royal Oak*, *Ark Royal* and
+*Indianapolis*. A few are what-ifs, like *Yamato* and *Tirpitz*.
+
+The original 2D pygame version is preserved at the `v1.0.0` tag.
 
 ## Running it
 
-### From source (Linux, also works on Windows and macOS)
+### Prebuilt (Linux and Windows)
 
-You need Python 3.10 or newer.
-
-```bash
-git clone https://github.com/nrobertson152/Silent-Bearing.git
-cd Silent-Bearing
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python main.py
-```
-
-### Prebuilt executables
-
-Every push to `main` builds standalone Linux and Windows executables with GitHub
-Actions. Download them from the **Actions** tab (latest run, then *Artifacts*).
-Pushing a tag such as `v0.1.0` also attaches them to a GitHub release.
-
-On Linux, unpack and run:
+Every push to `main` builds standalone executables with GitHub Actions. Open the
+**Actions** tab, pick the latest run and download an artifact. Pushing a tag such as
+`v2.0.0` also attaches the builds to a GitHub release.
 
 ```bash
 tar -xzf SilentBearing-linux-x86_64.tar.gz
-./SilentBearing
+./SilentBearing.x86_64
 ```
+
+### From source
+
+Install [Godot 4.7](https://godotengine.org/download) (the standard build, not .NET),
+then either open `project.godot` in the editor and press Play, or run:
+
+```bash
+godot --path /path/to/Silent-Bearing
+```
+
+The project uses the Compatibility (OpenGL 3) renderer so it runs on older and
+integrated GPUs. If you have a modern GPU you can switch to Forward+ in
+Project Settings > Rendering.
 
 ## How to play
 
-You start at periscope depth with the target somewhere over the horizon.
+You start at periscope depth with the target over the horizon, somewhere ahead.
 
-1. **Find her.** Listen on the hydrophones, then raise the scope (`P`) and train it
-   (arrow keys or drag the view) toward the strongest bearing.
-2. **Lock on.** Put the ship in the reticle and press `L`, or click her. Keep her in
-   sight for a while so the torpedo data computer can refine her course and speed.
-   The data strip at the bottom of the lens shows range, angle on the bow, gyro angle
-   and whether the shot is in range.
-3. **Get close.** Torpedoes are slow. Close to 1,000 to 2,500 metres off her beam.
-   Short looks with the scope are safer than leaving it up.
-4. **Fire.** `Space` fires one torpedo on the solution, `X` fires a spread of three.
-   Tubes take 45 seconds to reload.
-5. **Survive.** When the escorts turn toward you, go deep (`F` or `C` for a crash
-   dive), slow to 1/3 or stop, and change course. Destroyers hear fast, shallow boats
-   easily. Going below 70 metres halves their sonar's chances, and the German Type VIIC
-   can go much deeper than the rest. Don't go below test depth for long.
+1. **Listen.** Press `7` for the hydrophones. Long strobes are loud, close ships.
+2. **Look.** Press `2` (or walk to the attack periscope and press `E`). Train the scope
+   with the mouse and switch power with the wheel. Keep looks short: escorts and
+   aircraft can spot a periscope, especially if you're moving fast.
+3. **Lock.** Put the ship in the reticle and press `L` or click. Keep her in sight so
+   the torpedo data computer can refine her course and speed (the SOLN percentage).
+4. **Set depth.** Torpedoes run under a ship if set deeper than her draft. `[` and `]`
+   set the running depth. The TDC (`8`) tells you if it's too deep.
+5. **Fire.** Close to 1,000 to 2,500 metres off her beam and press `Space` for one
+   torpedo or `X` for a spread of three. Warheads don't arm for the first 250 metres.
+6. **Survive.** When escorts turn on you, go deep (`F`, or `C` to crash dive), slow to
+   1/3 or stop, and turn. Below the thermal layer their sonar works half as well.
+   Don't stay below test depth for long.
 
-Watch your battery: running fast underwater drains it quickly. Surface to recharge,
-if you dare.
+### On the surface
+
+Order the boat up with `R` until you surface. The diesels start and the battery charges.
+Climb the ladder in the control room or press `3` for the bridge, `4` for the deck gun,
+`5` for the AA gun. Surfacing is dangerous: warships open fire and bracket you with
+each salvo until you change course or speed, and aircraft spot surfaced boats from far
+away. When the lookouts call aircraft, dive. Diving takes time (27 seconds for a Type
+VII, nearly a minute for an I-boat), and everyone on deck has to clear the bridge.
 
 ### Controls
 
 | Key | Action |
 | --- | --- |
-| `W` / `S` | Engine telegraph up / down |
-| `A` / `D` | Rudder left / right |
-| `R` / `F` | Order shallower / deeper |
+| `W A S D`, `Shift` | Walk around inside the boat |
+| Mouse | Look, train the periscope, aim the guns |
+| `E` or left click | Use the station you're facing |
+| `1` to `5` | Control room, periscope, bridge, deck gun, AA gun |
+| `6` to `0` | Plot table, hydrophones, TDC, damage board, outside view |
+| `Up` / `Down` | Engine telegraph |
+| `Left` / `Right` | Rudder |
+| `R` / `F` | Order shallower / deeper (all the way up surfaces) |
 | `C` | Crash dive |
 | `P` | Raise or lower the periscope |
-| `Left` / `Right` or drag | Train the periscope (hold `Shift` to train faster) |
-| `B` | Swing the scope back to the bow |
-| `Z` or mouse wheel on scope | Low / high power |
-| `L` or click a ship | Lock target on the TDC |
-| `Space` | Fire one torpedo |
-| `X` | Fire a spread of three |
-| `T` | Time compression (1x, 4x, 16x) |
-| `M` or mouse wheel on chart | Plot table scale |
-| `V` | Sound on / off |
-| `Esc` | Pause menu |
+| `Z`, mouse wheel | Periscope power |
+| `L`, left click | Lock target (periscope or bridge) |
+| `Space` / `X` | Fire one torpedo / a spread of three |
+| `[` `]` | Torpedo running depth |
+| Left / right mouse | Fire / gun sight or binoculars |
+| `T` | Time compression 1x, 4x, 16x |
+| `Tab` | Plot table |
+| `V` | Sound on or off |
+| `F1` | Help |
 | `F11` | Fullscreen |
+| `Esc` | Leave a station, go below, or pause |
 
-Everything can also be done with the on-screen buttons.
+## What's simulated
+
+- **Your boat:** separate surface (diesel) and submerged (electric) speeds, battery
+  drain and charging, air going foul on long dives, dive and surface times per class,
+  test and crush depth, flooding and pumps, and damage to individual systems
+  (periscope, hydrophones, diesels, motors, planes, tubes, deck gun, pumps) that the
+  crew repairs over time.
+- **Torpedoes:** speed, range, wake or no wake, arming distance, running depth versus
+  target draft, dud rates, gyro angles up to 90 degrees.
+- **Escorts:** destroyers and sub-chasers with sonar and hydrophones, hunting and
+  depth-charge runs, a thermal layer, ramming, and guns that fire on a surfaced boat or
+  a periscope.
+- **Aircraft:** patrol planes that spot surfaced boats, periscopes and shallow hulls,
+  then bomb, strafe and call in the escorts. More arrive once the alarm is raised.
+- **Lookouts:** targets that spot torpedo wakes in daylight and turn away, escorts that
+  bracket you with gunfire, and crew reports for everything.
 
 ## The navies
 
-| Navy | Boat | Torpedo | Notes |
-| --- | --- | --- | --- |
-| United States | Gato-class | Mk 14, 46 kn, 4.1 km | Big torpedo load, but 15% duds |
-| United Kingdom | T-class | Mk VIII, 45 kn, 4.6 km | Reliable, six-tube bow salvo |
-| Germany | Type VIIC | G7e, 30 kn, 5 km | Slow, wakeless, dives very deep |
-| Japan | Type B1 | Type 95, 49 kn, 9 km | Long range, fast, nearly wakeless |
+| Navy | Boat | Torpedo | Deck gun | Notes |
+| --- | --- | --- | --- | --- |
+| United States | Gato-class | Mk 14, 46 kn, 4.1 km | 4-inch/50 | Big torpedo load |
+| United Kingdom | T-class | Mk VIII, 45 kn, 4.6 km | 4-inch QF | Reliable six-tube salvo |
+| Germany | Type VIIC | G7e, 30 kn, 5 km | 8.8 cm | Fast dive, very deep, wakeless |
+| Japan | Type B1 | Type 95, 49 kn, 9 km | 14 cm | Long range, slow to dive |
 
-Figures are rounded from published wartime specifications and adjusted where needed
-for play.
+Figures are rounded from published wartime specifications and adjusted for play.
 
 ## Project layout
 
 ```
-main.py                     entry point
-silent_bearing/
-  data.py                   navies, boats, torpedoes and target warships
-  world.py                  simulation: boat, ships, escort AI, torpedoes, depth charges
-  scope.py                  periscope rendering and ship silhouettes
-  instruments.py            hydrophone scope, plot table, dials and bars
-  game.py                   window, layout, menus and input
-  audio.py                  procedurally generated sound (needs numpy)
-  ui.py                     palette, fonts and buttons
-tests/                      headless simulation tests (python -m pytest)
+project.godot              Godot project
+scenes/main.tscn           entry scene (everything else is built in code)
+scripts/
+  data.gd                  navies, boats, aircraft, targets and ship layouts
+  util.gd                  bearing and ballistics helpers
+  sim/world.gd             the simulation: no rendering, fully testable
+  build/                   procedural models: warships, your boat, aircraft, crew, islands
+  view/                    ocean, sky, effects and the 3D world
+  interior/                walkable interior and the first-person player
+  ui/                      HUD, sights, live instruments, menus
+  audio/sfx.gd             procedurally synthesised sound
+  game.gd                  modes, cameras, input and the game loop
+shaders/                   ocean and sky
+tests/run_tests.gd         headless simulation tests
+tools/                     screenshot tools for models and scenes
 ```
 
-The simulation in `world.py` doesn't depend on pygame, so it can be tested or reused
-on its own. Adding a new target is a single entry in `data.py`.
+Every model, sound and texture is generated in code, so there are no binary assets.
+Ships are described as data in `scripts/data.gd`: turret positions, superstructure,
+funnels and masts along the hull. Adding a ship is one entry there.
+
+### Running the tests
+
+```bash
+godot --headless --path . --import
+godot --headless --path . -s tests/run_tests.gd
+```
+
+### Rendering previews
+
+```bash
+xvfb-run godot --path . --rendering-driver opengl3 -s tools/model_preview.gd -- /tmp/out
+xvfb-run godot --path . --rendering-driver opengl3 -s tools/game_preview.gd -- /tmp/out de barham
+```
 
 ## License
 

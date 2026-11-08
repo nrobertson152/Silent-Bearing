@@ -94,6 +94,21 @@ func _ready() -> void:
 	add_child(menu)
 	menu.build(self)
 	_demo()
+	# Debug helper: SilentBearing -- --autostart us shokaku
+	var args := OS.get_cmdline_user_args()
+	var i := args.find("--autostart")
+	if i >= 0:
+		var nid: String = args[i + 1] if args.size() > i + 1 else "us"
+		var tid: String = args[i + 2] if args.size() > i + 2 else "shokaku"
+		start_mission.call_deferred(nid, tid)
+	# Debug helper: -- --shot /path/out.png 20  saves a screenshot after N seconds and quits.
+	var j := args.find("--shot")
+	if j >= 0 and args.size() > j + 2:
+		var path: String = args[j + 1]
+		get_tree().create_timer(float(args[j + 2])).timeout.connect(func():
+			get_viewport().get_texture().get_image().save_png(path)
+			print("saved ", path, " mode=", mode, " t=", world.t if world else -1.0)
+			get_tree().quit())
 
 
 # ------------------------------------------------------------------ setup

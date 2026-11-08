@@ -443,11 +443,12 @@ func _box(body: StaticBody3D, c: Vector3, s: Vector3) -> void:
 
 # ----------------------------------------------------------------- lights
 func _lights() -> void:
-	var z := Z_FWD + 2.0
+	# Eight lights at most: the Compatibility renderer lights each mesh with up to eight.
+	var z := Z_FWD + 2.7
 	while z < Z_AFT:
 		var l := OmniLight3D.new()
 		l.position = Vector3(0, 3.3, z)
-		l.omni_range = 6.5
+		l.omni_range = 7.5
 		l.light_energy = 1.2
 		l.light_color = Color(1.0, 0.94, 0.82)
 		l.omni_attenuation = 1.2
@@ -458,7 +459,7 @@ func _lights() -> void:
 		var lm := MeshInstance3D.new()
 		lm.mesh = lk.commit()
 		add_child(lm)
-		z += 4.0
+		z += 5.4
 
 
 func _water() -> void:

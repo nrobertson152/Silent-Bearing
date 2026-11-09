@@ -122,7 +122,8 @@ func _process(dt: float) -> bool:
 				w.emit({"type": "splash", "pos": Vector3(tg.pos.x - 120, 0, tg.pos.y - 80), "size": 9.0})
 				w.emit({"type": "dc", "pos": Vector3(s.pos.x + 160, 0, s.pos.y + 260), "depth": 30.0})
 				w.emit({"type": "muzzle", "pos": Vector3(tg.pos.x, 10, tg.pos.y), "cal": 127.0, "ship": tg.id})
-				tg.fire = 0.9
+				tg.hull.fire[int(tg.hull.n * 0.3)] = 0.9
+				tg.hull.fire[int(tg.hull.n * 0.6)] = 0.6
 			cam.fov = 48.0
 			cam.global_position = sp + fw * 20.0 + Vector3(0, 9, 0)
 			cam.look_at(tp + Vector3(0, 14, 0))

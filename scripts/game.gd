@@ -737,6 +737,7 @@ func _cameras(dt: float) -> void:
 			var tr := sn.global_transform.basis.get_euler(EULER_ORDER_YXZ)
 			player.roll = tr.z * 0.8
 			player.hull_pitch = tr.x * 0.8
+			interior.level_water(tr.x, tr.z, player.global_position.z - INTERIOR_ORIGIN.z)
 		"periscope":
 			var head: Vector3 = sn.get_meta("scope_head")
 			var hp := sn.global_transform * head

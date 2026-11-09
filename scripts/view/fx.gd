@@ -20,6 +20,7 @@ var m_mist: ShaderMaterial
 var m_smoke: ShaderMaterial
 var m_soot: ShaderMaterial
 var m_steam: ShaderMaterial
+var m_cloud: ShaderMaterial
 var m_fire: ShaderMaterial
 var m_flash: ShaderMaterial
 var m_debris: StandardMaterial3D
@@ -36,6 +37,8 @@ func _init() -> void:
 	m_smoke = puff_mat(Color(0.2, 0.19, 0.18), 1.2, 0.95, 0.0, 6.0)
 	m_soot = puff_mat(Color(0.07, 0.065, 0.06), 1.0, 1.0, 0.0, 8.0)
 	m_steam = puff_mat(Color(0.82, 0.82, 0.8, 0.8), 1.4, 0.9, 0.6, 6.0)
+	# Huge smoke clouds fade out over tens of metres where they meet the sea.
+	m_cloud = puff_mat(Color(0.08, 0.075, 0.07), 0.8, 1.0, 0.0, 70.0)
 	m_fire = flame_mat(1.0, 0.5)
 	m_flash = flame_mat(2.5, 0.0)
 	m_debris = StandardMaterial3D.new()
@@ -248,6 +251,64 @@ func explosion(pos: Vector3, size: float, kind: String) -> void:
 	particles(pos + Vector3(0, size, 0), m_ember, int(clampf(size * 3.0, 10.0, 40.0)), 2.2, Vector2(size * 2.0, size * 6.0), 70.0,
 		Vector2(0.5, 1.0), Vector3(0, -6.0, 0), ramp(Color(1.0, 0.85, 0.5, 1), Color(1.0, 0.3, 0.05, 0)),
 		true, Vector3.UP, Vector3.ZERO, Vector3(1, 1, 0.6), Vector2(0.2, 0.6))
+
+
+## A magazine going up: a blinding flash, a jet of flame driven hundreds of
+## feet into the sky, a towering cloud of smoke spreading at its top, and
+## wreckage raining down into the sea for seconds afterwards. `size` is about
+## a seventh of the ship's length.
+func magazine(pos: Vector3, size: float) -> void:
+	var s := size
+	var k := sqrt(s / 30.0)
+	_light(pos + Vector3(0, s * 3.0, 0), Color(1.0, 0.66, 0.36), s * 150.0, 28.0, 2.4)
+	particles(pos + Vector3(0, s * 1.5, 0), m_flash, 4, 0.45, Vector2(0, 0), 0.0, Vector2(s * 9.0, s * 13.0),
+		Vector3.ZERO, ramp(Color(1, 1, 1, 1), Color(1, 1, 1, 0)), true, Vector3.UP, Vector3.ZERO, Vector3(0.6, 1.0, 1.3))
+	# The jet: flame and burning cordite driven straight up out of the hull.
+	particles(pos, m_fire, 48, 2.8, Vector2(45.0, 100.0) * k, 9.0, Vector2(s * 0.9, s * 2.0), Vector3(0, -3.0, 0),
+		stops([[0.0, Color(1, 1, 1, 1)], [0.45, Color(0.75, 1, 1, 0.95)], [1.0, Color(0.15, 1, 1, 0)]]),
+		true, Vector3.UP, Vector3(s * 0.25, s * 0.2, s * 0.7), Vector3(0.5, 1.3, 2.2), Vector2(16.0, 26.0) * k)
+	# A low fireball rolling out over the water.
+	particles(pos + Vector3(0, s * 0.6, 0), m_fire, 26, 1.8, Vector2(s * 0.8, s * 2.2), 85.0, Vector2(s * 1.6, s * 3.0),
+		Vector3(0, 2.0, 0), stops([[0.0, Color(1, 1, 1, 1)], [0.5, Color(0.6, 1, 1, 0.9)], [1.0, Color(0.1, 1, 1, 0)]]),
+		true, Vector3.UP, Vector3(s * 0.6, s * 0.3, s * 1.2), Vector3(0.4, 1.2, 1.8), Vector2(2.0, 4.0))
+	# The smoke: a column that climbs and spreads at the top, drifting downwind.
+	particles(pos + Vector3(0, s * 2.0, 0), m_cloud, 50, 45.0, Vector2(28.0, 60.0) * k, 8.0, Vector2(s * 1.4, s * 2.6),
+		wind * 0.6 + Vector3(0, 0.3, 0),
+		stops([[0.0, Color(1, 1, 1, 0.0)], [0.03, Color(1, 1, 1, 0.95)], [0.4, Color(1.2, 1.2, 1.2, 0.85)], [1.0, Color(1.7, 1.7, 1.7, 0)]]),
+		true, Vector3.UP, Vector3(s * 0.4, s * 1.0, s * 0.8), Vector3(0.4, 1.8, 3.2), Vector2(1.4, 2.0) * k)
+	particles(pos + Vector3(0, s * 8.0, 0), m_cloud, 30, 45.0, Vector2(4.0, 14.0) * k, 70.0, Vector2(s * 3.0, s * 5.0),
+		wind * 0.7 + Vector3(0, 0.1, 0),
+		stops([[0.0, Color(1, 1, 1, 0.0)], [0.12, Color(1, 1, 1, 0.9)], [0.5, Color(1.3, 1.3, 1.3, 0.7)], [1.0, Color(1.8, 1.8, 1.8, 0)]]),
+		true, Vector3.UP, Vector3(s * 1.2, s * 1.0, s * 1.2), Vector3(0.5, 1.8, 3.6), Vector2(0.5, 1.0))
+	# Wreckage and embers flung high, falling back into the sea.
+	particles(pos + Vector3(0, s, 0), m_debris, 44, 9.0, Vector2(s * 1.2, s * 2.8), 60.0,
+		Vector2(0.6, 2.2) * clampf(s / 12.0, 0.8, 3.0), Vector3(0, -9.8, 0), ramp(Color(1, 1, 1, 1), Color(1, 1, 1, 1)),
+		true, Vector3.UP, Vector3(s * 0.3, s * 0.3, s * 0.8), Vector3(1, 1, 1), Vector2(0.0, 0.3), chunk)
+	particles(pos + Vector3(0, s, 0), m_ember, 70, 4.5, Vector2(s * 1.0, s * 3.2), 75.0, Vector2(0.8, 1.6),
+		Vector3(0, -7.0, 0), ramp(Color(1.0, 0.85, 0.5, 1), Color(1.0, 0.3, 0.05, 0)),
+		true, Vector3.UP, Vector3(s * 0.3, s * 0.3, s * 0.8), Vector3(1, 1, 0.6), Vector2(0.2, 0.6))
+	for i in 14:
+		var r := s * randf_range(1.5, 7.0)
+		var a := randf() * TAU
+		pending.append({"at": t + randf_range(2.5, 8.0), "fn": "splash",
+			"pos": Vector3(pos.x + cos(a) * r, 0.0, pos.z + sin(a) * r), "size": randf_range(1.4, 3.6)})
+	_patch(pos, s * 3.5, 6.0, 1.0, true)
+	_patch(pos, s * 2.6, 45.0, 1.0)
+
+
+## A shell that bounced off armour: a shower of sparks and a puff of smoke.
+func ricochet(pos: Vector3) -> void:
+	_light(pos, Color(1.0, 0.8, 0.5), 18.0, 3.0, 0.12)
+	spark(pos)
+
+
+## Burning wreckage going under: a gush of steam.
+func quench(pos: Vector3, size: float) -> void:
+	particles(Vector3(pos.x, 0.5, pos.z), m_steam, 16, 9.0, Vector2(size * 0.8, size * 2.0), 25.0,
+		Vector2(size * 1.0, size * 1.8), wind * 1.2 + Vector3(0, 0.6, 0),
+		stops([[0.0, Color(1, 1, 1, 0.0)], [0.08, Color(1, 1, 1, 0.8)], [1.0, Color(1.1, 1.1, 1.1, 0)]]),
+		true, Vector3.UP, Vector3(size * 0.6, 0.3, size * 0.6), Vector3(0.5, 1.6, 3.0), Vector2(0.5, 1.2))
+	_patch(pos, size * 1.4, 18.0, 0.8)
 
 
 ## A depth charge: the sea bulges into a white dome of spray, then for shallow

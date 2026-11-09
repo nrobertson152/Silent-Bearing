@@ -19,6 +19,8 @@ uniform float wear = 0.5;
 uniform float rust = 0.3;
 uniform float seed = 0.0;
 
+#include "res://shaders/clip.gdshaderinc"
+
 varying vec3 v_obj;
 varying vec3 v_n;
 
@@ -55,6 +57,7 @@ void vertex() {
 }
 
 void fragment() {
+	float edge = clip_ship(v_obj);
 	vec3 p = v_obj;
 	vec3 n = normalize(v_n);
 	vec3 col;
@@ -107,6 +110,10 @@ void fragment() {
 		col = mix(c, painted, stained * (1.0 - worn * 0.7));
 		rough = mix(0.9, 0.8, stained);
 	}
+	if (!FRONT_FACING && cut.y != 0.0) {
+		col *= 0.12;
+	}
+	col *= mix(0.15, 1.0, smoothstep(0.0, 4.0, edge));
 	ALBEDO = col;
 	ROUGHNESS = rough;
 	SPECULAR = 0.3;

@@ -46,6 +46,10 @@ jobs:
             ./godot --headless --path . -s tools/deck_test.gd -- - $n 2>&1 | tee -a deck.log
           done
           if grep -q "SCRIPT ERROR\|DECK FAIL\|DECK .* FAIL" deck.log; then exit 1; fi
+      - name: Ships founder, capsize, blow up and break in two with the view attached
+        run: |
+          ./godot --headless --path . -s tools/sink_test.gd 2>&1 | tee sink.log
+          if grep -q "SCRIPT ERROR\|SINK FAIL" sink.log || ! grep -q "SINK OK" sink.log; then exit 1; fi
 
   export:
     needs: test

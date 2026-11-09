@@ -989,7 +989,7 @@ func _water() -> void:
 	var pm := PlaneMesh.new()
 	var zf: float = COMPARTMENTS[0][1]
 	var za: float = COMPARTMENTS[-1][2]
-	pm.size = Vector2(4.4, za - zf)
+	pm.size = Vector2(4.4, (za - zf) * 2.0)
 	water.mesh = pm
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(0.12, 0.2, 0.22, 0.78)
@@ -1000,6 +1000,13 @@ func _water() -> void:
 	water.position = Vector3(0, -0.2, (zf + za) * 0.5)
 	water.visible = false
 	add_child(water)
+
+
+## Keep the water in the bilges level with the sea as the boat pitches and
+## rolls, pivoting where you stand.
+func level_water(pitch: float, roll: float, at_z: float) -> void:
+	water.basis = Basis(Vector3(0, 0, 1), -roll) * Basis(Vector3(1, 0, 0), -pitch)
+	water.position.z = at_z
 
 
 # ------------------------------------------------------------------ update

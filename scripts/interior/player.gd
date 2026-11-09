@@ -1,6 +1,7 @@
 extends CharacterBody3D
-## First-person walking inside the boat. The camera rolls and pitches with
-## the hull and jolts when depth charges go off.
+## First-person walking inside the boat. The camera stays (mostly) level as
+## the hull pitches and rolls, so the boat's angle shows in the compartment
+## around you, and it jolts when depth charges go off.
 
 const SPEED := 2.6
 const RUN := 4.2
@@ -71,7 +72,10 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	if dir.length() > 0.1:
 		bob += delta * spd * 2.4
-	head.rotation = Vector3(pitch, yaw, 0)
+	# Undo the hull's pitch and roll (applied outside the look yaw, so it
+	# holds whichever way you face).
+	var level := Basis(Vector3(0, 0, 1), -roll) * Basis(Vector3(1, 0, 0), -hull_pitch)
+	head.basis = level * Basis.from_euler(Vector3(pitch, yaw, 0), EULER_ORDER_YXZ)
 	var jolt := Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * shake * 0.05
 	cam.position = Vector3(0, sin(bob) * 0.025, 0) + jolt
-	cam.rotation = Vector3(hull_pitch, 0, roll + jolt.x * 0.5)
+	cam.rotation = Vector3(0, 0, jolt.x * 0.5)

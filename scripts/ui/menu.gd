@@ -220,7 +220,7 @@ func _brief() -> void:
 			["Target", ("at anchor" if tg["kn"] == 0 else "about %d knots" % int(tg["kn"])) + (", zigzagging" if tg["zig"] else "")],
 			["Screen", "%d destroyers, %d sub-chasers" % [tg["escorts"], tg["chasers"]]], ["Air cover", air],
 			["Draft", "about %d m: set torpedoes shallower than that" % int(tg["draft"])],
-			["To sink her", "%d torpedo hits (shellfire helps a little)" % tg["hp"]]]:
+			["To sink her", "about %d torpedo hits, fewer all down one side" % tg["hp"]]]:
 		g.add_child(Style.label(kv[0], 14, Style.MUTED))
 		g.add_child(Style.label(kv[1], 14, Style.TEXT))
 	left.add_child(g)

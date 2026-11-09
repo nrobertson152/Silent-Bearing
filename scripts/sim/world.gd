@@ -6,6 +6,8 @@ extends RefCounted
 ## Sim space: Vector2(x east, y north) in metres. 3D sim vectors are
 ## Vector3(x, altitude, north). U.to3() converts to Godot space.
 
+const Ballistics := preload("res://scripts/sim/ballistics.gd")
+const Damage := preload("res://scripts/sim/damage.gd")
 const GameData := preload("res://scripts/data.gd")
 const U := preload("res://scripts/util.gd")
 
@@ -71,6 +73,9 @@ class Sub:
 	var aa_reload := 0.0
 	var sys := {}
 	var grounded := false
+	var pitch := 0.0          # hull angle, degrees, + = bow up
+	var vz := 0.0             # vertical speed, m/s, + = going deeper
+	var ballast := 0.0        # variable ballast, m/s it adds to vz (+ = flooded, heavy)
 
 	func surfaced() -> bool:
 		return depth < 0.8 and flood < 0.05
@@ -134,6 +139,8 @@ class Ship:
 	var aware := false
 	var comb_done := false
 	var hits_taken := 0
+	var hull: Damage            # compartments, flooding, list, machinery, rudder, fires
+	var said := {}              # damage reports already given
 
 	func alive() -> bool:
 		return not dead and struct > 0.0
@@ -303,6 +310,7 @@ func _spawn() -> void:
 	tg.zig = spec["zig"]
 	tg.cruise = tg.max_kn if tg.max_kn < 4.0 else tg.max_kn * 0.85
 	tg.guns = _batteries(tg.type)
+	tg.hull = _make_hull(tg, float(spec["hp"]))
 	if tg.max_kn < 4.0:
 		tg.pos = Vector2(randf_range(-1200, 1200), randf_range(5200, 6600))
 		tg.hdg = randf_range(0, 360)
@@ -369,7 +377,14 @@ func _make_small(nation_s: String, kind: String, nm: String) -> Ship:
 		e.max_kn = 20.0
 	e.struct = e.max_struct
 	e.guns = _batteries(e.type)
+	e.hull = _make_hull(e, e.max_struct / 100.0)
 	return e
+
+
+func _make_hull(sh: Ship, hits_to_sink: float) -> Damage:
+	var h := Damage.new()
+	h.setup(sh.layout, sh.type, sh.nation, sh.length, sh.beam, sh.draft, hits_to_sink)
+	return h
 
 
 func _orbit_init(e: Ship, tg: Ship, i: int, n: int, r: float, kn: float) -> void:
@@ -521,6 +536,8 @@ func set_depth(d: float, crash := false) -> void:
 		if s.flood < 1.0:
 			report("Diving officer: diving to %d metres. Opening vents." % int(d))
 			sound("klaxon", 0.8)
+		elif absf(s.spd) < 1.5 and absf(d - s.depth) > 4.0:
+			report("Diving officer: make my depth %d metres. With no way on the planes won't bite; it'll be slow on the trim tanks." % int(d))
 		else:
 			report("Diving officer: make my depth %d metres." % int(d))
 	if d > 0.0 and s.flood < 0.5 and exposed():
@@ -790,13 +807,16 @@ func update(dt: float) -> void:
 		if sh.struct <= 0.0:
 			_sink(sh, dt)
 			continue
+		var h0 := sh.hdg
 		if sh.kind == "target":
 			_target_ai(sh, dt)
 		else:
 			_escort_ai(sh, dt)
 		_ship_guns(sh, dt)
+		_damage_limits(sh, h0, dt)
 		_move(sh, dt)
-		sh.fire = maxf(0.0, sh.fire - dt * 0.004)
+		sh.hull.step(dt)
+		_hull_news(sh)
 	_update_planes(dt)
 	_update_torps(dt)
 	_update_shells(dt)
@@ -847,15 +867,24 @@ func _update_sub(dt: float) -> void:
 	s.vel = U.dirv(s.hdg) * s.spd * U.KN
 	s.pos += s.vel * dt
 
-	# Ballast and depth.
+	# Ballast and depth. Submerged, the planes and the hull's angle do most of
+	# the work, and only bite with way on; the variable ballast helps, slowly.
 	var planes_ok: float = 0.5 + 0.5 * s.sys["planes"] / 100.0
+	var v_ms := absf(s.spd) * U.KN
 	if s.dep_ord <= 0.0:
 		if s.depth > 3.0:
-			s.depth = move_toward(s.depth, 3.0, 0.9 * planes_ok * dt)
+			# Blow main ballast: she rises bodily, bow up.
+			s.ballast = move_toward(s.ballast, -1.0, 0.25 * dt)
+			s.pitch = move_toward(s.pitch, 7.0 * planes_ok, 2.5 * dt)
+			s.vz = s.ballast - v_ms * sin(deg_to_rad(s.pitch)) * planes_ok + _heaviness() * 0.3
+			s.depth = maxf(3.0, s.depth + minf(s.vz, -0.25) * dt)
 		else:
 			var was := s.flood
 			s.flood = maxf(0.0, s.flood - dt / 9.0)
 			s.depth = 3.0 * s.flood
+			s.pitch = move_toward(s.pitch, 0.0, 2.0 * dt)
+			s.ballast = 0.0
+			s.vz = 0.0
 			if was > 0.0 and s.flood == 0.0:
 				s.crew_ready = 10.0
 				s.scope_up = false
@@ -866,14 +895,15 @@ func _update_sub(dt: float) -> void:
 			var dt_f: float = float(N["dive_time"]) * (0.65 if s.crash else 1.0)
 			s.flood = minf(1.0, s.flood + dt / dt_f)
 			var cap := s.flood * s.flood * 8.0
+			var d0 := s.depth
 			s.depth = move_toward(s.depth, minf(s.dep_ord, cap), 2.0 * dt)
+			s.vz = (s.depth - d0) / maxf(dt, 1e-4)
+			# The bow dips as the forward tanks flood.
+			s.pitch = move_toward(s.pitch, -(7.0 if s.crash else 4.0) * s.flood, 3.0 * dt)
 			if s.flood >= 1.0:
 				report("Diving officer: we're under. Decks awash, %d metres." % int(s.depth))
 		else:
-			var rate := (2.2 if s.crash else 0.9) * planes_ok
-			s.depth = move_toward(s.depth, s.dep_ord, rate * dt)
-			if s.crash and absf(s.depth - s.dep_ord) < 0.5:
-				s.crash = false
+			_depth_keeping(s, v_ms, planes_ok, dt)
 
 	# Flooding.
 	if s.leak > 0.0:
@@ -882,8 +912,6 @@ func _update_sub(dt: float) -> void:
 	if s.water > 0.0:
 		s.water = maxf(0.0, s.water - 0.12 * dt * s.sys["pumps"] / 100.0)
 		s.water = minf(s.water, 100.0)
-		if not s.surfaced():
-			s.depth += s.water * 0.003 * clampf(1.0 - absf(s.spd) / 8.0, 0.3, 1.0) * dt
 	s.depth = maxf(0.0, s.depth)
 
 	if not s.surfaced() and s.scope_up and s.depth > PERI_MAX:
@@ -958,6 +986,50 @@ func _update_sub(dt: float) -> void:
 	s.aa_reload = maxf(0.0, s.aa_reload - dt)
 
 
+## How fast the water aboard would sink her with no way on (m/s).
+func _heaviness() -> float:
+	return sub.water * 0.008
+
+
+## The diving officer holds or changes depth: he angles the boat with the
+## planes, which only work with way on, and floods or pumps the variable
+## ballast to help, which is slow. The trim pumps can only offset so much
+## water; a heavy, flooded boat needs speed and an up angle just to stay
+## where she is, or main ballast blown.
+func _depth_keeping(s: Sub, v_ms: float, planes_ok: float, dt: float) -> void:
+	var vmax := 2.4 if s.crash else 1.0
+	var err := s.dep_ord - s.depth
+	var want := clampf(err * (0.12 if s.crash else 0.08), -vmax, vmax)
+	if s.crash and err < 4.0:
+		s.crash = false
+		report("Diving officer: blowing negative. Leveling off at %d metres." % int(s.dep_ord))
+	var heavy := _heaviness()
+	# Variable ballast: the negative tank in a crash dive, the trim tanks
+	# otherwise, pumped dry to carry water she has taken aboard.
+	var pump_out: float = 0.25 * s.sys["pumps"] / 100.0
+	var bal_want := clampf(want * (0.9 if s.crash else 0.5) - heavy, -pump_out, 1.4 if s.crash else 0.3)
+	var rate := 0.35 if s.crash else (0.3 if s.ballast > 0.35 else 0.08)
+	s.ballast = move_toward(s.ballast, bal_want, rate * dt)
+	# Planes: angle the hull to make up the rest, within what the speed allows.
+	var need := want - s.ballast - heavy
+	var max_ang := (22.0 if s.crash else 12.0) * planes_ok
+	var ang := 0.0
+	if v_ms > 0.15:
+		ang = -rad_to_deg(asin(clampf(need / v_ms, -1.0, 1.0)))
+	ang = clampf(ang, -max_ang, max_ang)
+	if s.spd < 0.0:
+		ang = -ang * 0.5
+	s.pitch = move_toward(s.pitch, ang, (6.0 if s.crash else 3.0) * dt)
+	var planes_vz := -v_ms * sin(deg_to_rad(s.pitch)) * (1.0 if s.spd >= 0.0 else -1.0)
+	s.vz = planes_vz + s.ballast + heavy
+	s.depth += s.vz * dt
+	if s.depth < 3.5:
+		s.depth = 3.5
+		s.vz = maxf(s.vz, 0.0)
+	if heavy > 0.05 and s.vz > 0.05 and s.depth > s.dep_ord + 3.0:
+		report("Diving officer: she's heavy and going down! I need more speed, or we blow ballast.", "warn", "heavy", 45.0)
+
+
 func exposed() -> bool:
 	return station in ["deck", "gun", "aa"]
 
@@ -1018,13 +1090,118 @@ func _sink(sh: Ship, dt: float) -> void:
 	sh.want_spd = 0.0
 	sh.spd = maxf(0.0, sh.spd - dt)
 	sh.pos += U.dirv(sh.hdg) * sh.spd * U.KN * dt
-	sh.fire = minf(1.0, sh.fire + dt * 0.2)
-	var dur := 60.0 if sh.kind == "target" else 35.0
+	sh.fire = minf(1.0, maxf(sh.fire, sh.hull.burning()) + dt * 0.05)
+	var big := sh.kind == "target"
+	var dur: float = {"capsize": 40.0 if big else 24.0, "explode": 30.0 if big else 16.0}.get(sh.hull.mode, 75.0 if big else 40.0)
 	sh.sinking = minf(1.0, sh.sinking + dt / dur)
+	# Battleships that roll over can still blow up as the magazines turn turtle.
+	if sh.hull.mode == "capsize" and sh.type == "bb" and sh.sinking > 0.3 and not sh.said.has("rollblast"):
+		sh.said["rollblast"] = true
+		if randf() < 0.35:
+			_magazine_blast(sh, 0.3, "As she rolled over, her magazine exploded!")
 	if sh.sinking >= 1.0:
 		sh.dead = true
 		if lock == sh:
 			lock = null
+
+
+## Damage caps her speed, and a jammed rudder turns her in circles whatever
+## the helm wants.
+func _damage_limits(sh: Ship, h0: float, dt: float) -> void:
+	var h := sh.hull
+	sh.want_spd = minf(sh.want_spd, sh.max_kn * h.speed_factor())
+	if h.rudder_jam != 0.0:
+		var turn := h.rudder_jam / 35.0 * 2.2 * clampf(sh.spd / 8.0, 0.15, 1.0)
+		sh.hdg = U.wrap360(h0 + turn * dt)
+	sh.struct = sh.max_struct * h.health()
+	sh.fire = h.burning()
+	sh.sink_side = 1.0 if h.list >= 0.0 else -1.0
+
+
+## Where along the hull (0 bow, 1 stern) and which side (-1 port, +1 starboard) a point is.
+static func hull_spot(sh: Ship, p: Vector2) -> Vector2:
+	var d := p - sh.pos
+	var along := d.dot(U.dirv(sh.hdg))
+	var across := d.dot(U.dirv(sh.hdg + 90.0))
+	return Vector2(clampf(0.5 - along / sh.length, 0.02, 0.98), 1.0 if across >= 0.0 else -1.0)
+
+
+static func where(u: float) -> String:
+	return "forward" if u < 0.3 else ("aft" if u > 0.7 else "amidships")
+
+
+func _visible(sh: Ship) -> bool:
+	return sub.can_see() and sub.pos.distance_to(sh.pos) < vis
+
+
+## Turns what happened inside a ship's hull this tick into reports and effects.
+func _hull_news(sh: Ship) -> void:
+	var h := sh.hull
+	var seen := _visible(sh)
+	var nm := sh.short
+	for ev in h.events:
+		match ev["what"]:
+			"rudder":
+				if seen:
+					report("Conn: %s is turning in circles! Her rudder must be jammed." % nm, "good")
+				else:
+					report("Sonar: %s's bearing is drifting oddly. She may be circling." % nm, "info")
+			"engines":
+				if not sh.said.has("eng") and h.engines < 0.6:
+					sh.said["eng"] = true
+					report("Sonar: %s's screws are slowing. Her machinery is hurt." % nm, "good")
+			"dead_in_water":
+				report("Conn: %s has lost way. She's dead in the water!" % nm, "good")
+			"counterflood":
+				if seen and sh.kind == "target":
+					report("She's counterflooding. The list is easing a little.", "info", "cf%d" % sh.id, 60.0)
+			"mag_flooded":
+				if seen and sh.kind == "target":
+					report("Smoke and steam from her forward deck. They're flooding a magazine.", "info", "mf%d" % sh.id, 90.0)
+			"magazine":
+				_magazine_blast(sh, float(ev["u"]), "Her magazine went up! %s has blown apart!" % nm)
+			"broken":
+				sh.struct = 0.0
+				report("%s's back is broken! She's going down in two pieces." % nm, "good")
+				_ship_sunk(sh, "broken")
+			"capsize":
+				sh.struct = 0.0
+				_ship_sunk(sh, "capsize")
+			"founder":
+				sh.struct = 0.0
+				_ship_sunk(sh, "founder")
+			"wrecked":
+				sh.struct = 0.0
+				_ship_sunk(sh, "wrecked")
+	h.events.clear()
+	if not h.afloat() and sh.struct > 0.0:
+		sh.struct = 0.0
+	# Running commentary on how she lies in the water.
+	if seen and sh.kind == "target" and h.afloat():
+		var l := absf(h.list)
+		for step in [5.0, 12.0, 20.0, 27.0]:
+			var key := "list%d" % int(step)
+			if l > step and not sh.said.has(key):
+				sh.said[key] = true
+				report("She's listing to %s, about %d degrees." % ["starboard" if h.list > 0.0 else "port", int(l)], "good")
+		if absf(h.trim) > 2.0 and not sh.said.has("trim"):
+			sh.said["trim"] = true
+			report("She's down by the %s." % ("bow" if h.trim > 0.0 else "stern"), "good")
+		if h.burning() > 0.6 and not sh.said.has("fire"):
+			sh.said["fire"] = true
+			report("Fires are spreading aboard %s." % nm, "good")
+
+
+func _magazine_blast(sh: Ship, u: float, text: String) -> void:
+	var p := sh.pos + U.dirv(sh.hdg) * (0.5 - u) * sh.length
+	emit({"type": "boom", "pos": Vector3(p.x, 4.0, p.y), "size": sh.length / 7.0, "kind": "magazine", "ship": sh.id, "u": u})
+	sound("breakup", 1.0)
+	sound("torp_hit", 1.0, Vector3(p.x, 0.0, p.y))
+	shake = maxf(shake, 0.5)
+	report(text, "good" if sh.kind != "own" else "alarm")
+	if sh.struct > 0.0:
+		sh.struct = 0.0
+		_ship_sunk(sh, "magazine")
 
 
 func _target_ai(sh: Ship, dt: float) -> void:
@@ -1231,10 +1408,10 @@ func _salvo(sh: Ship, g: Dictionary, r: float, at_scope: bool) -> void:
 	sh.aim_hdg = s.hdg
 	sh.aim_spd = s.spd
 	var v: float = g["v"]
-	var e := U.elev_for_range(r, v)
-	if e < 0.0:
+	var cal: float = g["cal"]
+	var tof := Ballistics.time_for_range(r, v, cal)
+	if tof < 0.0:
 		return
-	var tof := 2.0 * v * sin(deg_to_rad(e)) / GRAV
 	var lead := s.pos + s.vel * tof
 	var err := (30.0 + r * 0.02) * sh.spread * (1.6 if at_scope else 1.0)
 	var center := Vector2(U.gauss(), U.gauss()) * err
@@ -1249,7 +1426,7 @@ func _salvo(sh: Ship, g: Dictionary, r: float, at_scope: bool) -> void:
 func _launch(from: Vector3, aim: Vector2, v: float, kind: String, dmg: float, cal: float, owner: int) -> void:
 	var d := aim - Vector2(from.x, from.z)
 	var R := d.length()
-	var e := U.elev_for_range(R, v)
+	var e := U.elev_for_range(R, v, cal)
 	if e < 0.0:
 		return
 	var dir := d.normalized()
@@ -1278,8 +1455,14 @@ func _update_shells(dt: float) -> void:
 	var keep: Array[Shell] = []
 	for sh in shells:
 		var p0: Vector3 = sh.p
-		sh.v.y -= GRAV * dt
-		sh.p += sh.v * dt
+		if sh.kind in ["ship", "gun"]:
+			# Air drag slows shells down over their flight.
+			var f := Ballistics.fly(sh.p, sh.v, Ballistics.drag(sh.cal), dt)
+			sh.p = f[0]
+			sh.v = f[1]
+		else:
+			sh.v.y -= GRAV * dt
+			sh.p += sh.v * dt
 		sh.life += dt
 		var done := false
 		match sh.kind:
@@ -1296,7 +1479,7 @@ func _update_shells(dt: float) -> void:
 							continue
 						var along := d2.dot(U.dirv(ship.hdg))
 						var across := d2.dot(U.dirv(ship.hdg + 90.0))
-						var sink_drop := ship.sinking * 20.0
+						var sink_drop := ship.sinking * 20.0 + ship.hull.settle
 						if absf(along) < ship.length * 0.5 and absf(across) < ship.beam * 0.5 \
 								and q.y < _hull_height(ship, along) - sink_drop and q.y > -1.0:
 							sh.p = q
@@ -1339,17 +1522,28 @@ static func _seg_dist(a: Vector3, b: Vector3, p: Vector3) -> float:
 
 
 func _gun_hit(ship: Ship, sh: Shell) -> void:
-	ship.struct -= sh.dmg
-	ship.fire = minf(1.0, ship.fire + 0.12)
+	var spot := hull_spot(ship, Vector2(sh.p.x, sh.p.z))
+	var side_n := U.dirv(ship.hdg + 90.0) * spot.y
+	var fl := Vector2(sh.v.x, sh.v.z)
+	var cos_ob := absf(fl.normalized().dot(side_n)) if fl.length() > 1.0 else 1.0
+	var height: float = sh.p.y + ship.hull.settle
+	var res := ship.hull.shell(spot.x, int(spot.y), height, sh.cal, sh.v.length(), cos_ob, sh.dmg, ship.max_struct)
+	ship.struct = ship.max_struct * ship.hull.health()
 	ship.hits_taken += 1
 	gun_hits += 1
 	alert = true
-	emit({"type": "boom", "pos": sh.p, "size": 2.5, "kind": "shell_hit", "ship": ship.id})
+	emit({"type": "boom", "pos": sh.p, "size": 2.5 if res["pen"] else 1.4, "kind": "shell_hit" if res["pen"] else "bounce", "ship": ship.id})
 	sound("hit_far", 0.6, sh.p)
+	_hull_news(ship)
 	if ship.struct <= 0.0:
-		_ship_sunk(ship, "gunfire")
+		if ship.alive() or ship.hull.afloat():
+			_ship_sunk(ship, "gunfire")
+	elif not res["pen"]:
+		report("Gun crew: hit on %s, but it bounced off her %s." % [ship.short, "armour belt" if res["where"] == "belt" else "plating"],
+			"info", "gunhit%d" % ship.id, 6.0)
 	else:
-		report("Gun crew: hit on %s!" % ship.short, "good", "gunhit%d" % ship.id, 6.0)
+		report("Gun crew: hit on %s%s!" % [ship.short, ", at the waterline" if res["flood"] else (", she's burning" if res["fire"] else "")],
+			"good", "gunhit%d" % ship.id, 6.0)
 	if ship.kind != "target" and not ship.aware:
 		ship.aware = true
 	if ship.kind == "target" or ship.kind == "escort":
@@ -1595,7 +1789,7 @@ func _update_torps(dt: float) -> void:
 				hit = sh
 				break
 		if hit != null:
-			if tp.depth > hit.draft + 1.5:
+			if tp.depth > hit.draft + hit.hull.settle + 1.5:
 				if not tp.has_meta("under%d" % hit.id):
 					tp.set_meta("under%d" % hit.id, true)
 					report("Sonar: torpedo ran under %s! Set it shallower." % hit.short, "warn")
@@ -1646,21 +1840,22 @@ func _torp_hit(tp: Torpedo, sh: Ship) -> void:
 		sound("thud", 0.6)
 		report("Hit on %s, but no explosion. A dud!" % sh.short, "warn")
 	else:
-		sh.struct -= 100.0
+		var spot := hull_spot(sh, tp.pos)
 		sh.hits_taken += 1
 		hits += 1
-		sh.max_kn *= 0.85
-		sh.cruise = minf(sh.cruise, sh.max_kn)
-		sh.fire = minf(1.0, sh.fire + 0.5)
-		sh.sink_side = 1.0 if U.adiff(U.brg(sh.pos, tp.pos), sh.hdg) > 0.0 else -1.0
 		emit({"type": "boom", "pos": Vector3(tp.pos.x, 0.0, tp.pos.y), "size": sh.length / 18.0, "kind": "torpedo", "ship": sh.id})
 		sound("torp_hit", clampf(1.2 - r / 8000.0, 0.3, 1.0))
 		tc = 1
-		if sh.struct <= 0.0:
+		sh.hull.torpedo(spot.x, int(spot.y), float(nat["torp"].get("kg", 300.0)) / 300.0)
+		sh.struct = sh.max_struct * sh.hull.health()
+		var blew := sh.hull.mode == "explode"
+		_hull_news(sh)
+		if not blew and sh.struct > 0.0:
+			var left := sh.hull.hits_left()
+			report("Explosion! Torpedo hit %s on %s, %s side. Estimate %d more hit%s to sink her." % [where(spot.x), sh.short,
+				"starboard" if spot.y > 0.0 else "port", left, "s" if left > 1 else ""], "good")
+		elif sh.struct <= 0.0 and not blew and sh.kind == "target" and result == "":
 			_ship_sunk(sh, "torpedo")
-		else:
-			var left := int(ceil(sh.struct / 100.0))
-			report("Explosion! Torpedo hit on %s. She's slowing. Estimate %d more hit%s to sink her." % [sh.short, left, "s" if left > 1 else ""], "good")
 	alert = true
 	var err := 350.0 if bool(nat["torp"]["wake"]) else 700.0
 	for e in ships:
@@ -1673,13 +1868,24 @@ func _torp_hit(tp: Torpedo, sh: Ship) -> void:
 
 
 func _ship_sunk(sh: Ship, how: String) -> void:
+	if sh.said.has("sunk"):
+		return
+	sh.said["sunk"] = true
+	if sh.hull.mode == "":
+		sh.hull.mode = "founder"
+	var how_txt: String = {"capsize": "She's rolling over! %s is capsizing!", "magazine": "%s is going down in two pieces!",
+		"broken": "%s is going down in two pieces!",
+		"wrecked": "%s is a burning wreck. She's going down!", "founder": "She's settling fast. %s is going down!"}.get(how,
+		"She's breaking up! %s is going down!")
 	if sh.kind == "target":
-		report("She's breaking up! %s is going down!" % sh.name, "good")
+		if how not in ["magazine", "broken"]:
+			report(how_txt % sh.name, "good")
 		sound("breakup", 1.0)
 		_end("win", 12.0)
 	else:
 		esc_sunk += 1
-		report("%s is sinking! Escort destroyed." % sh.name, "good")
+		if how not in ["magazine", "broken"]:
+			report("%s is sinking! Escort destroyed." % sh.name, "good")
 		sound("breakup", 0.6)
 
 

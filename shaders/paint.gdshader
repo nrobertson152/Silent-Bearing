@@ -30,6 +30,8 @@ uniform float metal = 0.0;
 uniform float scale = 1.0;     // camouflage pattern size
 uniform float band = 2.0;      // height of the grimy band above the waterline
 
+#include "res://shaders/clip.gdshaderinc"
+
 varying vec3 v_obj;
 varying vec3 v_n;
 
@@ -137,6 +139,7 @@ void vertex() {
 }
 
 void fragment() {
+	float edge = clip_ship(v_obj);
 	vec3 p = v_obj;
 	vec3 n = normalize(v_n);
 	vec3 an = abs(n);
@@ -228,6 +231,11 @@ void fragment() {
 	rs = clamp(rs * rust * 1.1, 0.0, 0.7);
 	col = mix(col, col * vec3(0.72, 0.74, 0.7) + vec3(0.02, 0.025, 0.015), dirt * grime * 0.7);
 	col = mix(col, rust_c, rs);
+	// A torn-open hull: dark inside, scorched along the break.
+	if (!FRONT_FACING && cut.y != 0.0) {
+		col *= 0.12;
+	}
+	col *= mix(0.15, 1.0, smoothstep(0.0, 4.0, edge));
 	ALBEDO = col;
 	ROUGHNESS = clamp(rough + rs * 0.15 - mott * 0.08, 0.3, 1.0);
 	METALLIC = metal * (1.0 - rs);

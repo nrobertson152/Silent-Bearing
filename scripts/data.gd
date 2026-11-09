@@ -160,6 +160,7 @@ const HELP := [
 	["Tab", "Plot table"],
 	["M", "Sound on or off"],
 	["F1", "Show or hide this help"],
+	["F9", "Graphics quality: low, medium, high"],
 	["F11", "Fullscreen"],
 	["Esc", "Leave a station or pause"],
 ]

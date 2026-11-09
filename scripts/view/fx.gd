@@ -1,43 +1,88 @@
 extends Node3D
-## Short-lived effects: shell splashes, depth-charge eruptions, explosions,
-## muzzle flashes, strafing lines and hit sparks. Positions are Godot space.
+## Effects: shell splashes, depth-charge eruptions, explosions, muzzle blasts,
+## strafing, hit sparks, funnel smoke, ship fires and bow spray. Built from
+## billboard particles drawn by shaders/puff.gdshader (lit smoke and spray) and
+## shaders/flame.gdshader (fire), plus brief lights, and foam patches on the
+## wake map. Positions are Godot space.
+
+const Wakes := preload("res://scripts/view/wakes.gd")
 
 var items: Array = []
 var pending: Array = []
 var t := 0.0
 var night := false
+var wind := Vector3(1, 0, 0)
+var wakes: Wakes
 
-var m_spray: StandardMaterial3D
-var m_smoke: StandardMaterial3D
-var m_fire: StandardMaterial3D
+var m_spray: ShaderMaterial
+var m_column: ShaderMaterial
+var m_mist: ShaderMaterial
+var m_smoke: ShaderMaterial
+var m_soot: ShaderMaterial
+var m_steam: ShaderMaterial
+var m_fire: ShaderMaterial
+var m_flash: ShaderMaterial
+var m_debris: StandardMaterial3D
+var m_ember: StandardMaterial3D
 var quad: QuadMesh
-var col_mesh: CylinderMesh
-var ball: SphereMesh
+var chunk: BoxMesh
+var fires: Array = []
 
 
 func _init() -> void:
-	m_spray = _pmat(Color(0.92, 0.95, 0.96), false)
-	m_smoke = _pmat(Color(0.2, 0.2, 0.2), false)
-	m_fire = _pmat(Color(1.0, 0.6, 0.25), true)
+	m_spray = puff_mat(Color(0.93, 0.95, 0.96), 2.5, 0.8, 0.35, 1.5)
+	m_column = puff_mat(Color(0.95, 0.97, 0.98), 2.0, 0.7, 0.12, 1.5)
+	m_mist = puff_mat(Color(0.9, 0.93, 0.95, 0.7), 1.2, 0.7, 1.0, 4.0)
+	m_smoke = puff_mat(Color(0.2, 0.19, 0.18), 1.2, 0.95, 0.0, 6.0)
+	m_soot = puff_mat(Color(0.07, 0.065, 0.06), 1.0, 1.0, 0.0, 8.0)
+	m_steam = puff_mat(Color(0.82, 0.82, 0.8, 0.8), 1.4, 0.9, 0.6, 6.0)
+	m_fire = flame_mat(1.0, 0.5)
+	m_flash = flame_mat(2.5, 0.0)
+	m_debris = StandardMaterial3D.new()
+	m_debris.albedo_color = Color(0.08, 0.08, 0.08)
+	m_debris.roughness = 0.9
+	m_ember = StandardMaterial3D.new()
+	m_ember.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m_ember.albedo_color = Color(3.0, 1.8, 0.7)
+	m_ember.albedo_texture = soft_tex()
+	m_ember.vertex_color_use_as_albedo = true
+	m_ember.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m_ember.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 	quad = QuadMesh.new()
 	quad.size = Vector2(1, 1)
-	col_mesh = CylinderMesh.new()
-	col_mesh.top_radius = 0.35
-	col_mesh.bottom_radius = 1.0
-	col_mesh.height = 1.0
-	col_mesh.radial_segments = 14
-	col_mesh.rings = 1
-	ball = SphereMesh.new()
-	ball.radius = 0.5
-	ball.height = 1.0
-	ball.radial_segments = 14
-	ball.rings = 8
+	chunk = BoxMesh.new()
+	chunk.size = Vector3(0.6, 0.35, 0.9)
+
+
+static func puff_mat(c: Color, churn: float, lumpy: float, thin: float, soft: float) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/puff.gdshader")
+	m.set_shader_parameter("tint", c)
+	m.set_shader_parameter("scatter", 0.15 + thin * 1.1)
+	m.set_shader_parameter("churn", churn)
+	m.set_shader_parameter("lumpy", lumpy)
+	m.set_shader_parameter("thin", thin)
+	m.set_shader_parameter("soft", soft)
+	return m
+
+
+static func flame_mat(heat: float, soot: float) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/flame.gdshader")
+	m.set_shader_parameter("heat", heat)
+	m.set_shader_parameter("soot", soot)
+	return m
+
+
+## Funnel smoke in a given colour.
+func smoke_mat(c: Color) -> ShaderMaterial:
+	return puff_mat(c, 1.0, 0.95, 0.15, 6.0)
 
 
 static var _soft: GradientTexture2D
 
 
-## Soft round sprite so particles read as puffs rather than squares.
+## Soft round sprite (used by the boat's interior spray).
 static func soft_tex() -> GradientTexture2D:
 	if _soft == null:
 		var g := Gradient.new()
@@ -66,41 +111,60 @@ static func _pmat(c: Color, emissive: bool) -> StandardMaterial3D:
 	return m
 
 
-func _solid(c: Color, emit := 0.0) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.albedo_color = c
-	m.roughness = 0.9
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	if emit > 0.0:
-		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	return m
+static func ramp(c0: Color, c1: Color) -> Gradient:
+	var g := Gradient.new()
+	g.set_color(0, c0)
+	g.set_color(1, c1)
+	return g
+
+
+## Colour ramp through several (offset, colour) stops.
+static func stops(pts: Array) -> Gradient:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array(pts.map(func(p): return p[0]))
+	g.colors = PackedColorArray(pts.map(func(p): return p[1]))
+	return g
+
+
+static func grow(a: float, b: float, c := -1.0) -> Curve:
+	var cv := Curve.new()
+	cv.max_value = maxf(maxf(a, b), c) + 0.01
+	cv.add_point(Vector2(0, a))
+	if c >= 0.0:
+		cv.add_point(Vector2(0.25, b))
+		cv.add_point(Vector2(1, c))
+	else:
+		cv.add_point(Vector2(1, b))
+	return cv
 
 
 func particles(pos: Vector3, mat: Material, amount: int, life: float, vel: Vector2, spread: float,
-		size: Vector2, grav: float, fade: Gradient, one_shot := true, dir := Vector3.UP, box := Vector3.ZERO) -> CPUParticles3D:
+		size: Vector2, grav: Vector3, fade: Gradient, one_shot := true, dir := Vector3.UP, box := Vector3.ZERO,
+		scale := Vector3(0.5, 1.0, 1.6), damp := Vector2(0.4, 1.2), mesh: Mesh = null) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
-	p.mesh = quad
+	p.mesh = mesh if mesh != null else quad
 	p.material_override = mat
-	p.amount = amount
+	p.amount = maxi(amount, 1)
 	p.lifetime = life
 	p.one_shot = one_shot
-	p.explosiveness = 0.85 if one_shot else 0.0
+	p.explosiveness = 0.9 if one_shot else 0.0
+	p.randomness = 0.3
+	p.lifetime_randomness = 0.3
 	p.direction = dir
 	p.spread = spread
 	p.initial_velocity_min = vel.x
 	p.initial_velocity_max = vel.y
-	p.gravity = Vector3(0, grav, 0)
+	p.gravity = grav
 	p.scale_amount_min = size.x
 	p.scale_amount_max = size.y
-	var curve := Curve.new()
-	curve.add_point(Vector2(0, 0.5))
-	curve.add_point(Vector2(0.3, 1.0))
-	curve.add_point(Vector2(1, 1.6))
-	p.scale_amount_curve = curve
+	p.scale_amount_curve = grow(scale.x, scale.y, scale.z)
+	p.angle_min = -180.0
+	p.angle_max = 180.0
+	p.angular_velocity_min = -20.0
+	p.angular_velocity_max = 20.0
 	p.color_ramp = fade
-	p.damping_min = 0.4
-	p.damping_max = 1.2
+	p.damping_min = damp.x
+	p.damping_max = damp.y
 	if box != Vector3.ZERO:
 		p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
 		p.emission_box_extents = box
@@ -111,87 +175,111 @@ func particles(pos: Vector3, mat: Material, amount: int, life: float, vel: Vecto
 	return p
 
 
-static func ramp(c0: Color, c1: Color) -> Gradient:
-	var g := Gradient.new()
-	g.set_color(0, c0)
-	g.set_color(1, c1)
-	return g
+func _light(pos: Vector3, col: Color, rng: float, energy: float, life: float) -> void:
+	var light := OmniLight3D.new()
+	light.light_color = col
+	light.omni_range = rng
+	light.omni_attenuation = 1.6
+	light.light_energy = energy
+	light.light_volumetric_fog_energy = 4.0
+	light.shadow_enabled = false
+	add_child(light)
+	light.global_position = pos
+	_track(light, life, "flash", {"e": energy})
 
 
 func _track(node: Node, life: float, kind: String, data := {}) -> void:
 	items.append({"node": node, "t0": t, "life": life, "kind": kind, "data": data})
 
 
+func _patch(pos: Vector3, radius: float, life: float, peak := 1.0, ring := false) -> void:
+	if wakes != null:
+		wakes.patch(pos, radius, life, peak, ring)
+
+
 # --------------------------------------------------------------- effects
+## A shell or bomb hitting the water: a tall column of spray thrown straight
+## up (droplets at a spread of speeds fill it from foot to top), a crown of
+## spray flung out round its base, mist rolling away and a foam patch.
 func splash(pos: Vector3, size: float) -> void:
 	var h := size * 4.5
-	var col := MeshInstance3D.new()
-	col.mesh = col_mesh
-	var m := _solid(Color(0.9, 0.93, 0.94, 0.85))
-	col.material_override = m
-	col.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(col)
-	col.global_position = Vector3(pos.x, 0, pos.z)
-	col.scale = Vector3(size * 0.5, 0.01, size * 0.5)
-	_track(col, 3.5, "column", {"h": h, "r": size * 0.5, "mat": m})
-	particles(Vector3(pos.x, h * 0.4, pos.z), m_spray, 16, 2.5, Vector2(size * 1.2, size * 2.6), 30.0,
-		Vector2(size * 0.6, size * 1.4), -9.8, ramp(Color(1, 1, 1, 0.8), Color(1, 1, 1, 0)))
+	var v := sqrt(2.0 * 9.8 * h)
+	var base := Vector3(pos.x, 0.3, pos.z)
+	var n := int(clampf(size * 9.0, 24.0, 110.0))
+	particles(base, m_column, n, v / 9.8 * 2.0, Vector2(v * 0.25, v), 3.0,
+		Vector2(size * 0.36, size * 0.62), Vector3(0, -9.8, 0),
+		stops([[0.0, Color(1, 1, 1, 1.0)], [0.55, Color(1, 1, 1, 0.85)], [1.0, Color(1, 1, 1, 0)]]),
+		true, Vector3.UP, Vector3(size * 0.12, 0.1, size * 0.12), Vector3(0.7, 1.2, 2.6), Vector2(0.0, 0.3))
+	particles(base, m_spray, n / 2, v / 9.8 * 0.8, Vector2(v * 0.12, v * 0.32), 38.0,
+		Vector2(size * 0.3, size * 0.55), Vector3(0, -9.8, 0),
+		stops([[0.0, Color(1, 1, 1, 0.85)], [0.6, Color(1, 1, 1, 0.6)], [1.0, Color(1, 1, 1, 0)]]),
+		true, Vector3.UP, Vector3(size * 0.2, 0.1, size * 0.2), Vector3(0.6, 1.2, 2.0), Vector2(0.0, 0.4))
+	particles(base, m_mist, int(clampf(size * 2.5, 8.0, 30.0)), 5.0, Vector2(size * 0.4, size * 1.2), 85.0,
+		Vector2(size * 0.9, size * 1.6), Vector3(wind.x, 0.5, wind.z), ramp(Color(1, 1, 1, 0.45), Color(1, 1, 1, 0)),
+		true, Vector3.UP, Vector3(size * 0.3, 0.2, size * 0.3), Vector3(0.5, 1.5, 2.8), Vector2(0.8, 1.6))
+	_patch(pos, size * 1.6, 14.0, 0.9)
 
 
+## An explosion: flash, fireball, a column of smoke, debris and embers, and
+## for hits at the waterline a white column and a shock ring on the sea.
 func explosion(pos: Vector3, size: float, kind: String) -> void:
-	var fb := MeshInstance3D.new()
-	fb.mesh = ball
-	var m := _solid(Color(1.0, 0.65, 0.25, 1.0), 1.0)
-	fb.material_override = m
-	add_child(fb)
-	fb.global_position = pos + Vector3(0, size * 0.8, 0)
-	_track(fb, 1.0, "fireball", {"r": size * 5.0, "mat": m})
-	var light := OmniLight3D.new()
-	light.light_color = Color(1.0, 0.65, 0.35)
-	light.omni_range = size * 60.0
-	light.light_energy = 8.0
-	add_child(light)
-	light.global_position = pos + Vector3(0, size * 2.0, 0)
-	_track(light, 0.8, "flash", {"e": 8.0})
-	if kind == "torpedo" or kind == "bomb" or kind == "plane_crash" or kind == "ram":
-		splash(pos, size * (1.6 if kind == "torpedo" else 1.0))
-	particles(pos + Vector3(0, size, 0), m_fire, 18, 1.2, Vector2(size * 1.5, size * 4.0), 70.0,
-		Vector2(size * 1.0, size * 2.2), 2.0, ramp(Color(1, 0.8, 0.4, 1), Color(0.6, 0.15, 0.05, 0)))
-	particles(pos + Vector3(0, size * 1.5, 0), m_smoke, 22, 10.0, Vector2(size * 0.6, size * 1.6), 25.0,
-		Vector2(size * 2.0, size * 4.5), 1.2, ramp(Color(0.12, 0.11, 0.1, 0.85), Color(0.25, 0.25, 0.25, 0)))
+	var big := kind in ["torpedo", "magazine", "ram"]
+	_light(pos + Vector3(0, size * 2.0, 0), Color(1.0, 0.62, 0.32), size * 70.0, 14.0 if big else 8.0, 0.9)
+	particles(pos + Vector3(0, size * 0.8, 0), m_flash, 3, 0.18, Vector2(0, 0), 0.0, Vector2(size * 7.0, size * 9.0),
+		Vector3.ZERO, ramp(Color(1, 1, 1, 1), Color(1, 1, 1, 0)), true, Vector3.UP, Vector3.ZERO, Vector3(0.6, 1.0, 1.2))
+	if kind in ["torpedo", "bomb", "plane_crash", "ram"]:
+		splash(pos, size * (1.7 if kind == "torpedo" else 1.0))
+		_patch(pos, size * 2.0, 3.0, 1.0, true)
+	# Fireball: hot puffs flung out fast, slowed by the air, cooling to soot.
+	particles(pos + Vector3(0, size, 0), m_fire, int(clampf(size * 2.5, 10.0, 30.0)), 1.4, Vector2(size * 1.5, size * 4.5), 180.0,
+		Vector2(size * 1.2, size * 2.6), Vector3(0, 3.0, 0),
+		stops([[0.0, Color(1, 1, 1, 1)], [0.5, Color(0.6, 1, 1, 0.9)], [1.0, Color(0.1, 1, 1, 0)]]),
+		true, Vector3.UP, Vector3.ZERO, Vector3(0.4, 1.2, 1.8), Vector2(3.0, 5.0))
+	# Smoke column drifting downwind.
+	var drift := wind * 1.6 + Vector3(0, 1.4, 0)
+	particles(pos + Vector3(0, size * 1.5, 0), m_soot, int(clampf(size * 2.5, 12.0, 36.0)), 14.0, Vector2(size * 0.6, size * 1.8), 30.0,
+		Vector2(size * 2.2, size * 4.0), drift,
+		stops([[0.0, Color(1, 1, 1, 0.0)], [0.06, Color(1, 1, 1, 0.9)], [0.5, Color(1.3, 1.3, 1.3, 0.6)], [1.0, Color(1.8, 1.8, 1.8, 0)]]),
+		true, Vector3.UP, Vector3(size * 0.5, size * 0.3, size * 0.5), Vector3(0.5, 1.6, 3.4), Vector2(0.6, 1.4))
+	# Debris and embers on ballistic arcs.
+	particles(pos + Vector3(0, size, 0), m_debris, int(clampf(size * 1.5, 6.0, 20.0)), 3.0, Vector2(size * 3.0, size * 7.0), 55.0,
+		Vector2(0.4, 1.4) * clampf(size / 6.0, 0.6, 2.5), Vector3(0, -9.8, 0), ramp(Color(1, 1, 1, 1), Color(1, 1, 1, 1)),
+		true, Vector3.UP, Vector3.ZERO, Vector3(1, 1, 1), Vector2(0.0, 0.2), chunk)
+	particles(pos + Vector3(0, size, 0), m_ember, int(clampf(size * 3.0, 10.0, 40.0)), 2.2, Vector2(size * 2.0, size * 6.0), 70.0,
+		Vector2(0.5, 1.0), Vector3(0, -6.0, 0), ramp(Color(1.0, 0.85, 0.5, 1), Color(1.0, 0.3, 0.05, 0)),
+		true, Vector3.UP, Vector3.ZERO, Vector3(1, 1, 0.6), Vector2(0.2, 0.6))
 
 
+## A depth charge: the sea bulges into a white dome of spray, then for shallow
+## settings bursts into a plume, leaving a wide foam slick and a shock ring.
 func depth_charge(pos: Vector3, depth: float) -> void:
-	var dome := MeshInstance3D.new()
-	dome.mesh = ball
-	var m := _solid(Color(0.86, 0.92, 0.92, 0.9))
-	dome.material_override = m
-	add_child(dome)
-	dome.global_position = Vector3(pos.x, 0, pos.z)
 	var r := clampf(30.0 - depth * 0.12, 8.0, 26.0)
-	_track(dome, 3.0, "dome", {"r": r, "mat": m})
+	var base := Vector3(pos.x, 0.3, pos.z)
+	var v := sqrt(2.0 * 9.8 * r * 0.7)
+	particles(base, m_spray, 70, v / 9.8 * 1.9, Vector2(v * 0.35, v), 50.0, Vector2(r * 0.18, r * 0.32), Vector3(0, -9.8, 0),
+		stops([[0.0, Color(1, 1, 1, 0.9)], [0.5, Color(1, 1, 1, 0.75)], [1.0, Color(1, 1, 1, 0)]]),
+		true, Vector3.UP, Vector3(r * 0.35, 0.1, r * 0.35), Vector3(0.6, 1.2, 2.2), Vector2(0.0, 0.4))
+	particles(base, m_mist, 22, 6.0, Vector2(r * 0.05, r * 0.2), 80.0, Vector2(r * 0.35, r * 0.7), Vector3(wind.x, 0.4, wind.z),
+		ramp(Color(1, 1, 1, 0.4), Color(1, 1, 1, 0)), true, Vector3.UP, Vector3(r * 0.45, 0.2, r * 0.45), Vector3(0.6, 1.4, 2.6), Vector2(0.8, 1.6))
+	_patch(pos, r * 1.3, 30.0, 1.0)
+	_patch(pos, r * 1.2, 4.0, 0.9, true)
 	if depth < 90.0:
-		pending.append({"at": t + 0.35, "fn": "splash", "pos": pos, "size": clampf(9.0 - depth * 0.08, 2.5, 8.0)})
+		pending.append({"at": t + 0.45, "fn": "splash", "pos": pos, "size": clampf(9.0 - depth * 0.08, 2.5, 8.0)})
 
 
-func muzzle(pos: Vector3, cal: float) -> void:
+## A gun firing: a blinding flash, a jet of flame along the barrel and a
+## cloud of propellant smoke. `dir` is the barrel direction if known.
+func muzzle(pos: Vector3, cal: float, dir := Vector3.ZERO) -> void:
 	var s := clampf(cal / 60.0, 1.0, 6.0)
-	var light := OmniLight3D.new()
-	light.light_color = Color(1.0, 0.72, 0.4)
-	light.omni_range = s * 40.0
-	light.light_energy = 6.0
-	add_child(light)
-	light.global_position = pos
-	_track(light, 0.18, "flash", {"e": 6.0})
-	var fb := MeshInstance3D.new()
-	fb.mesh = ball
-	var m := _solid(Color(1.0, 0.8, 0.45, 1.0), 1.0)
-	fb.material_override = m
-	add_child(fb)
-	fb.global_position = pos
-	_track(fb, 0.15, "fireball", {"r": s * 3.0, "mat": m})
-	particles(pos, m_smoke, 8, 4.0, Vector2(1.0, 3.0), 50.0, Vector2(s * 2.0, s * 4.0), 0.5,
-		ramp(Color(0.6, 0.6, 0.58, 0.6), Color(0.7, 0.7, 0.7, 0)))
+	_light(pos, Color(1.0, 0.72, 0.4), s * 45.0, 9.0, 0.16)
+	var d := dir.normalized() if dir.length() > 0.1 else Vector3.UP
+	particles(pos, m_flash, 4, 0.14, Vector2(s * 4.0, s * 9.0), 8.0, Vector2(s * 1.4, s * 2.4), Vector3.ZERO,
+		ramp(Color(1, 1, 1, 1), Color(0.6, 1, 1, 0)), true, d, Vector3.ZERO, Vector3(0.7, 1.1, 1.3), Vector2(4.0, 6.0))
+	particles(pos, m_steam, int(clampf(s * 4.0, 5.0, 18.0)), 5.0, Vector2(s * 2.0, s * 7.0), 25.0, Vector2(s * 1.5, s * 3.0),
+		wind * 1.2 + Vector3(0, 0.3, 0), ramp(Color(0.85, 0.84, 0.8, 0.7), Color(0.9, 0.9, 0.9, 0)), true, d,
+		Vector3.ZERO, Vector3(0.5, 1.6, 3.0), Vector2(1.5, 3.0))
+	if pos.y < 12.0 and s >= 2.0:
+		_patch(pos, s * 6.0, 2.5, 0.5, true)
 
 
 func strafe(from: Vector3, to: Vector3) -> void:
@@ -201,13 +289,168 @@ func strafe(from: Vector3, to: Vector3) -> void:
 
 
 func spark(pos: Vector3) -> void:
-	particles(pos, m_fire, 8, 0.5, Vector2(8, 20), 180.0, Vector2(0.6, 1.2), -5.0,
-		ramp(Color(1, 0.9, 0.5, 1), Color(1, 0.4, 0.1, 0)))
+	particles(pos, m_ember, 14, 0.6, Vector2(8, 20), 180.0, Vector2(0.6, 1.0), Vector3(0, -6.0, 0),
+		ramp(Color(1, 0.9, 0.5, 1), Color(1, 0.4, 0.1, 0)), true, Vector3.UP, Vector3.ZERO, Vector3(1, 1, 0.5), Vector2(0.2, 0.5))
+	particles(pos, m_smoke, 4, 2.5, Vector2(0.5, 1.5), 60.0, Vector2(1.0, 2.0), wind * 0.8 + Vector3(0, 0.5, 0),
+		ramp(Color(1, 1, 1, 0.6), Color(1, 1, 1, 0)))
 
 
 func _bullet(pos: Vector3) -> void:
-	particles(Vector3(pos.x, 0.2, pos.z), m_spray, 5, 0.8, Vector2(3, 6), 12.0, Vector2(0.3, 0.6), -9.8,
-		ramp(Color(1, 1, 1, 0.8), Color(1, 1, 1, 0)))
+	particles(Vector3(pos.x, 0.2, pos.z), m_spray, 6, 0.9, Vector2(3, 7), 10.0, Vector2(0.3, 0.6), Vector3(0, -9.8, 0),
+		ramp(Color(1, 1, 1, 0.85), Color(1, 1, 1, 0)))
+	_patch(pos, 1.2, 4.0, 0.6)
+
+
+# --------------------------------------------------------- continuous
+## Smoke pouring from a funnel and streaming downwind.
+func funnel_smoke(parent: Node3D, pos: Vector3, mat: Material, size: float) -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.mesh = quad
+	p.material_override = mat
+	p.amount = 34
+	p.lifetime = 16.0
+	p.local_coords = false
+	p.direction = Vector3.UP
+	p.spread = 10.0
+	p.initial_velocity_min = 3.0
+	p.initial_velocity_max = 5.0
+	p.gravity = wind * 1.5 + Vector3(0, 0.25, 0)
+	p.damping_min = 0.3
+	p.damping_max = 0.6
+	p.scale_amount_min = size
+	p.scale_amount_max = size * 1.5
+	p.scale_amount_curve = grow(0.6, 2.0, 5.5)
+	p.angle_min = -180.0
+	p.angle_max = 180.0
+	p.color_ramp = stops([[0.0, Color(1, 1, 1, 0.0)], [0.05, Color(1, 1, 1, 0.75)], [0.5, Color(1.15, 1.15, 1.15, 0.4)], [1.0, Color(1.3, 1.3, 1.3, 0)]])
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.position = pos
+	parent.add_child(p)
+	return p
+
+
+## Smoke trailing from a falling aircraft.
+func trail_smoke(parent: Node3D) -> CPUParticles3D:
+	var p := funnel_smoke(parent, Vector3.ZERO, m_soot, 2.5)
+	p.amount = 60
+	p.lifetime = 7.0
+	p.initial_velocity_max = 1.0
+	p.gravity = wind * 1.0 + Vector3(0, 0.5, 0)
+	return p
+
+
+## A fire burning on deck: flames, a thick column of black smoke, embers and a
+## flickering light on the superstructure.
+func ship_fire(parent: Node3D, pos: Vector3, size: float) -> Dictionary:
+	var fl := CPUParticles3D.new()
+	fl.mesh = quad
+	fl.material_override = m_fire
+	fl.amount = 26
+	fl.lifetime = 1.3
+	fl.local_coords = false
+	fl.direction = Vector3.UP
+	fl.spread = 18.0
+	fl.initial_velocity_min = 2.0
+	fl.initial_velocity_max = 5.0
+	fl.gravity = Vector3(0, 5.0, 0) + wind * 1.5
+	fl.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	fl.emission_box_extents = Vector3(size * 0.5, 0.3, size * 0.8)
+	fl.scale_amount_min = size * 0.6
+	fl.scale_amount_max = size * 1.1
+	fl.scale_amount_curve = grow(0.5, 1.2, 0.6)
+	fl.angle_min = -30.0
+	fl.angle_max = 30.0
+	fl.color_ramp = stops([[0.0, Color(1, 1, 1, 0)], [0.1, Color(1, 1, 1, 1)], [1.0, Color(0.2, 1, 1, 0)]])
+	fl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	fl.position = pos
+	parent.add_child(fl)
+	var sm := funnel_smoke(parent, pos + Vector3(0, size * 0.8, 0), m_soot, size * 1.4)
+	sm.amount = 46
+	sm.lifetime = 20.0
+	sm.initial_velocity_min = 4.0
+	sm.initial_velocity_max = 7.0
+	sm.gravity = wind * 1.8 + Vector3(0, 0.8, 0)
+	sm.scale_amount_curve = grow(0.5, 2.2, 7.0)
+	var em := CPUParticles3D.new()
+	em.mesh = quad
+	em.material_override = m_ember
+	em.amount = 20
+	em.lifetime = 2.5
+	em.local_coords = false
+	em.direction = Vector3.UP
+	em.spread = 25.0
+	em.initial_velocity_min = 4.0
+	em.initial_velocity_max = 9.0
+	em.gravity = Vector3(0, -2.0, 0) + wind * 1.5
+	em.scale_amount_min = 0.6
+	em.scale_amount_max = 1.2
+	em.color_ramp = ramp(Color(1.0, 0.8, 0.4, 1), Color(1.0, 0.25, 0.05, 0))
+	em.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	em.emission_box_extents = Vector3(size * 0.5, 0.3, size * 0.8)
+	em.position = pos
+	parent.add_child(em)
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.55, 0.22)
+	light.omni_range = size * 9.0
+	light.omni_attenuation = 1.4
+	light.light_energy = 0.0
+	light.light_volumetric_fog_energy = 3.0
+	light.position = pos + Vector3(0, size * 0.8, 0)
+	parent.add_child(light)
+	var rec := {"flames": fl, "smoke": sm, "embers": em, "light": light, "level": 0.0, "seed": randf() * 10.0}
+	fires.append(rec)
+	return rec
+
+
+func set_fire(rec: Dictionary, level: float, smoke_on: bool) -> void:
+	rec["level"] = level
+	rec["flames"].emitting = level > 0.05
+	rec["embers"].emitting = level > 0.3
+	rec["smoke"].emitting = smoke_on
+
+
+func stop_fire(rec: Dictionary) -> void:
+	set_fire(rec, 0.0, false)
+
+
+## Spray thrown off both sides of the bow; strength follows speed.
+func bow_spray(beam: float) -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.mesh = quad
+	p.material_override = m_spray
+	p.amount = 40
+	p.lifetime = 1.6
+	p.local_coords = false
+	p.direction = Vector3(1, 1.2, -0.3)
+	p.spread = 25.0
+	p.initial_velocity_min = 3.0
+	p.initial_velocity_max = 6.0
+	p.gravity = Vector3(0, -9.8, 0)
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	p.emission_box_extents = Vector3(beam * 0.1, 0.3, 1.0)
+	p.scale_amount_min = maxf(beam * 0.12, 0.4)
+	p.scale_amount_max = maxf(beam * 0.3, 0.9)
+	p.scale_amount_curve = grow(0.5, 1.4, 2.2)
+	p.angle_min = -180.0
+	p.angle_max = 180.0
+	p.color_ramp = stops([[0.0, Color(1, 1, 1, 0.0)], [0.1, Color(1, 1, 1, 0.8)], [1.0, Color(1, 1, 1, 0)]])
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.emitting = false
+	add_child(p)
+	p.set_meta("flip", 1.0)
+	return p
+
+
+## Swings a bow-spray emitter with the ship and alternates the side it throws to.
+func aim_spray(p: CPUParticles3D, xf: Transform3D, kn: float) -> void:
+	var yaw := xf.basis.get_euler(EULER_ORDER_YXZ).y
+	p.global_transform = Transform3D(Basis(Vector3.UP, yaw), p.global_position)
+	var flip: float = -float(p.get_meta("flip", 1.0))
+	p.set_meta("flip", flip)
+	p.direction = Vector3(flip, 1.1, -0.4)
+	var v := clampf(kn * 0.25, 2.0, 9.0)
+	p.initial_velocity_min = v * 0.6
+	p.initial_velocity_max = v
 
 
 func update(dt: float) -> void:
@@ -227,29 +470,21 @@ func update(dt: float) -> void:
 	for it in items:
 		var node: Node3D = it["node"]
 		var a: float = (t - it["t0"]) / it["life"]
-		var d: Dictionary = it["data"]
 		if a >= 1.0:
 			node.queue_free()
 			continue
-		match it["kind"]:
-			"column":
-				var rise := minf(1.0, a * 5.0)
-				var h: float = d["h"] * rise * (1.0 - maxf(0.0, a - 0.35) * 0.6)
-				node.scale = Vector3(d["r"] * (1.0 + a), maxf(h, 0.01), d["r"] * (1.0 + a))
-				node.position.y = h * 0.5
-				d["mat"].albedo_color.a = 0.85 * (1.0 - smoothstep(0.3, 1.0, a))
-			"dome":
-				var s: float = d["r"] * minf(1.0, a * 4.0)
-				node.scale = Vector3(s, s * 0.45, s)
-				d["mat"].albedo_color.a = 0.9 * (1.0 - a)
-			"fireball":
-				var s: float = d["r"] * (0.3 + a)
-				node.scale = Vector3(s, s, s)
-				d["mat"].albedo_color.a = 1.0 - a
-			"flash":
-				node.light_energy = d["e"] * (1.0 - a)
+		if it["kind"] == "flash":
+			node.light_energy = it["data"]["e"] * (1.0 - a) * (1.0 - a)
 		keep.append(it)
 	items = keep
+	# Fires flicker.
+	for f in fires:
+		var l: OmniLight3D = f["light"]
+		if not is_instance_valid(l):
+			continue
+		var s: float = f["seed"]
+		var flick := 0.75 + 0.25 * sin(t * 13.0 + s) * sin(t * 7.3 + s * 2.0) + 0.1 * sin(t * 29.0 + s)
+		l.light_energy = 3.5 * float(f["level"]) * flick * (1.6 if night else 1.0)
 	for c in get_children():
 		if c is CPUParticles3D and c.one_shot and not c.emitting:
 			c.queue_free()

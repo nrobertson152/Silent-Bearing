@@ -1,6 +1,6 @@
 extends SceneTree
 ## Walks through every compartment and saves a screenshot from each.
-## xvfb-run godot --path . --rendering-driver opengl3 -s tools/interior_preview.gd -- <out_dir> <nation> <target>
+## xvfb-run godot --path . -s tools/interior_preview.gd -- <out_dir> <nation> <target>
 
 const Game := preload("res://scripts/game.gd")
 

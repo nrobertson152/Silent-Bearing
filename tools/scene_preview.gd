@@ -1,6 +1,6 @@
 extends SceneTree
 ## Renders the outside world for a mission from a few camera positions.
-## xvfb-run godot --path . --rendering-driver opengl3 -s tools/scene_preview.gd -- <out_dir> <nation> <target>
+## xvfb-run godot --path . -s tools/scene_preview.gd -- <out_dir> <nation> <target>
 
 const GameData := preload("res://scripts/data.gd")
 const U := preload("res://scripts/util.gd")

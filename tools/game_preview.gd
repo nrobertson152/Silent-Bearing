@@ -1,6 +1,6 @@
 extends SceneTree
 ## Drives the real game through its screens and saves screenshots.
-## xvfb-run godot --path . --rendering-driver opengl3 -s tools/game_preview.gd -- <out_dir> <nation> <target>
+## xvfb-run godot --path . --fixed-fps 10 -s tools/game_preview.gd -- <out_dir> <nation> <target>
 
 const Game := preload("res://scripts/game.gd")
 const U := preload("res://scripts/util.gd")
@@ -147,7 +147,7 @@ func _process(_dt: float) -> bool:
 			wait = 3
 		"bridge":
 			game.go_deck("bridge")
-			game.free_yaw = -deg_to_rad(U.adiff(U.brg(w.sub.pos, w.target.pos), w.sub.hdg))
+			game.deck_player.face(-deg_to_rad(U.adiff(U.brg(w.sub.pos, w.target.pos), w.sub.hdg)), -0.02)
 			wait = 8
 			steps.pop_front()
 			steps.push_front("bridge_snap")

@@ -3,6 +3,7 @@ extends Node3D
 ## projectile, plus their smoke, wakes and fires. Reads World each frame.
 
 const Fx := preload("res://scripts/view/fx.gd")
+const GameData := preload("res://scripts/data.gd")
 const Gfx := preload("res://scripts/view/gfx.gd")
 const IslandBuilder := preload("res://scripts/build/island_builder.gd")
 const MeshKit := preload("res://scripts/build/mesh_kit.gd")
@@ -175,18 +176,37 @@ func underwater_env() -> Environment:
 func _add_ship(sh: World.Ship) -> void:
 	var node := ShipBuilder.build(sh.layout, sh.length, sh.beam, sh.draft)
 	add_child(node)
-	var rec := {"node": node, "turrets": node.get_meta("turrets"), "smoke": [], "fire": null,
-		"heave": 0.0, "pitch": 0.0, "roll": 0.0}
+	var rec := {"node": node, "turrets": node.get_meta("turrets"), "smoke": [], "fires": [], "fire_at": [],
+		"heave": 0.0, "pitch": 0.0, "roll": 0.0, "aft": null, "cut": 0.0, "foam": 0.0}
 	for top in node.get_meta("funnels"):
 		rec["smoke"].append(fx.funnel_smoke(node, top + Vector3(0, 1.0, 0), m_smoke, 3.2 if sh.type != "pc" else 1.6))
 	rec["wk"] = wakes.ship(node, sh.beam, sh.length, clampf(sh.length * 0.25, 30.0, 60.0))
 	rec["bow"] = fx.bow_spray(sh.beam)
+	# Where each compartment's fire breaks out: on deck above it (the flight
+	# deck for a carrier), a little to one side.
+	var lay := GameData.layout(sh.layout)
+	for i in sh.hull.n:
+		var u := sh.hull.comp_u(i)
+		var y := float(lay["deck"]["h"]) if lay["hull"] == "cv" else ShipBuilder.deck_h(lay, u)
+		rec["fire_at"].append(Vector3(randf_range(-0.22, 0.22) * sh.beam, y + 0.4, ShipBuilder.z_of(u, sh.length)))
+		rec["fires"].append(null)
 	ships[sh.id] = rec
 
 
-## Ship transform: riding the swell (big ships answer slowly and barely pitch),
-## plus listing and settling as she sinks.
+## Ship transform: riding the swell (big ships answer slowly and barely
+## pitch), heeling, trimming and settling with the water in her, then going
+## down the way she was lost. A ship broken in two is placed by _half_xform.
 func _ship_xform(sh: World.Ship, rec: Dictionary, dt: float) -> Transform3D:
+	var base := _base_xform(sh, rec, dt)
+	if rec["aft"] != null:
+		return _half_xform(sh, rec, base, true)
+	var pose := _pose(sh, rec)
+	var b := base.basis * Basis.from_euler(Vector3(pose.y, 0.0, pose.x), EULER_ORDER_YXZ)
+	return Transform3D(b, base.origin - Vector3(0, pose.z, 0))
+
+
+## Heading, position and the swell under her, fading as she goes down.
+func _base_xform(sh: World.Ship, rec: Dictionary, dt: float) -> Transform3D:
 	var p := Vector3(sh.pos.x, 0.0, -sh.pos.y)
 	var h := deg_to_rad(sh.hdg)
 	var fwd := Vector3(sin(h), 0, -cos(h))
@@ -202,11 +222,168 @@ func _ship_xform(sh: World.Ship, rec: Dictionary, dt: float) -> Transform3D:
 	rec["heave"] = lerpf(rec["heave"], (y_bow + y_st + y_p + y_s) * 0.25 * 0.85, k)
 	rec["pitch"] = lerpf(rec["pitch"], atan2(y_bow - y_st, hl * 2.0) * 0.8, k)
 	rec["roll"] = lerpf(rec["roll"], atan2(y_s - y_p, hw * 2.0) * 0.5, k * 0.7)
-	var drop := pow(sh.sinking, 1.4) * (sh.draft + 28.0)
-	var roll: float = rec["roll"] + sh.sinking * 0.9 * sh.sink_side + sin(time * 0.5 + sh.id * 2.0) * 0.012
-	var pitch: float = rec["pitch"] + sh.sinking * 0.14 + sin(time * 0.43 + sh.id) * 0.004
+	var calm := 1.0 - smoothstep(0.4, 1.0, sh.sinking)
+	var roll: float = (rec["roll"] + sin(time * 0.5 + sh.id * 2.0) * 0.012) * calm
+	var pitch: float = (rec["pitch"] + sin(time * 0.43 + sh.id) * 0.004) * calm
 	var b := Basis.from_euler(Vector3(pitch, U.yaw(sh.hdg), roll), EULER_ORDER_YXZ)
-	return Transform3D(b, Vector3(p.x, rec["heave"] - drop, p.z))
+	return Transform3D(b, Vector3(p.x, rec["heave"] * calm, p.z))
+
+
+## How she lies: heel and trim from the water in her, and once she is lost,
+## how she goes down: foundering by the head or the stern, or rolling over.
+## Returns (roll, pitch, drop): roll + = port side down and pitch + = bow up,
+## in radians; drop in metres.
+func _pose(sh: World.Ship, rec: Dictionary) -> Vector3:
+	var h := sh.hull
+	var roll := -deg_to_rad(h.list)
+	var pitch := -deg_to_rad(h.trim)
+	var drop := h.settle
+	var s := sh.sinking
+	if s <= 0.0:
+		return Vector3(roll, pitch, drop)
+	var L := sh.length
+	var top: float = rec["node"].get_meta("height", 30.0)
+	var side := signf(roll) if absf(roll) > 0.005 else (1.0 if sh.id % 2 == 0 else -1.0)
+	var by_head := h.trim > 0.15 or (absf(h.trim) <= 0.15 and ((sh.id >> 1) & 1) == 0)
+	var end := -1.0 if by_head else 1.0
+	if h.mode == "capsize":
+		# Over she goes, slowly at first; she floats bottom up for a while,
+		# then one end dips and she slides under.
+		var over := smoothstep(0.0, 0.5, s)
+		roll = lerpf(roll, side * deg_to_rad(168.0), over)
+		var k := smoothstep(0.5, 1.0, s)
+		pitch += end * deg_to_rad(26.0) * k
+		drop += 1.5 * over + pow(k, 1.5) * (sh.draft + sh.beam * 0.5 + L * 0.5 * sin(deg_to_rad(26.0)) + 10.0)
+		return Vector3(roll, pitch, drop)
+	# Foundering: she settles until the sea is over her deck, then one end goes
+	# under, the other rears up out of the water and she slides down.
+	var k0 := smoothstep(0.0, 0.35, s)
+	drop = lerpf(drop, maxf(drop, h.freeboard * 0.85), k0)
+	pitch += end * deg_to_rad(5.0) * k0
+	roll *= 1.0 + 0.6 * smoothstep(0.0, 0.8, s)
+	var steep := deg_to_rad(38.0 + 14.0 * clampf(1.0 - L / 250.0, 0.0, 1.0))
+	var k1 := smoothstep(0.35, 0.8, s)
+	var p1 := pitch
+	pitch += end * steep * k1
+	drop += L * 0.5 * (absf(sin(pitch)) - absf(sin(p1))) - 0.12 * L * k1
+	var k2 := smoothstep(0.78, 1.0, s)
+	drop += pow(k2, 1.5) * (0.12 * L + h.freeboard + top + 12.0)
+	return Vector3(roll, pitch, drop)
+
+
+## One half of a ship broken in two: it swings about its free end as the
+## broken end fills, the free end rearing out of the sea, then slides under.
+## The half that took the blast (the shorter one) goes first.
+func _half_xform(sh: World.Ship, rec: Dictionary, base: Transform3D, bow: bool) -> Transform3D:
+	var h := sh.hull
+	var L := sh.length
+	var cut: float = rec["cut"]
+	var tip := -L * 0.5 if bow else L * 0.5
+	var len_half := absf(tip - cut)
+	var shorter := len_half < L * 0.5
+	var s := clampf(sh.sinking * (1.7 if shorter else 1.0), 0.0, 1.0)
+	var a := deg_to_rad(60.0 + 20.0 * float((sh.id + (0 if bow else 1)) % 2)) * pow(smoothstep(0.0, 0.65, s), 0.9)
+	var rise := (0.1 * L + 5.0 if bow else 0.06 * L + 3.0) * smoothstep(0.05, 0.5, s)
+	var fb_tip := h.freeboard * (1.3 if bow else 1.0)
+	var under := pow(smoothstep(0.5, 1.0, s), 1.4) * (rise + fb_tip + 14.0)
+	var twist := deg_to_rad(6.0 + 12.0 * fmod(sh.id * 0.37 + (0.0 if bow else 0.5), 1.0)) * (1.0 if bow else -1.0) \
+		* smoothstep(0.0, 0.6, s)
+	var pivot := Vector3(0, 0, tip)
+	var turn := Basis(Vector3(1, 0, 0), a if bow else -a) * Basis(Vector3(0, 0, 1), twist - deg_to_rad(h.list))
+	var lean := Basis(Vector3(1, 0, 0), -deg_to_rad(h.trim))
+	var local := Transform3D(lean, Vector3.ZERO) * Transform3D(Basis(), pivot) * Transform3D(turn, Vector3.ZERO) \
+		* Transform3D(Basis(), -pivot)
+	var xf := base * local
+	xf.origin.y += rise - under - h.settle
+	return xf
+
+
+## She has blown up or broken her back: the stern half becomes a node of its
+## own drawing the same mesh, and each copy clips away the other's half. The
+## turrets and fires aft of the break go with the stern.
+func _split(sh: World.Ship, rec: Dictionary) -> void:
+	var node: Node3D = rec["node"]
+	var mi: MeshInstance3D = node.get_meta("hull_mesh")
+	var cut := ShipBuilder.z_of(sh.hull.break_u, sh.length)
+	var aft := Node3D.new()
+	aft.name = "SternHalf"
+	add_child(aft)
+	aft.transform = node.transform
+	var mi2 := MeshInstance3D.new()
+	mi2.mesh = mi.mesh
+	aft.add_child(mi2)
+	mi.set_instance_shader_parameter("cut", Vector2(cut, 1.0))
+	mi2.set_instance_shader_parameter("cut", Vector2(cut, -1.0))
+	for tn in rec["turrets"]:
+		if (tn as Node3D).position.z > cut:
+			tn.reparent(aft, false)
+	for i in rec["fires"].size():
+		var f = rec["fires"][i]
+		if f != null and rec["fire_at"][i].z > cut:
+			for k in ["flames", "smoke", "embers", "light"]:
+				(f[k] as Node).reparent(aft, false)
+	for sm in rec["smoke"]:
+		sm.emitting = false
+	rec["aft"] = aft
+	rec["cut"] = cut
+
+
+## Fires burning in her compartments, each above its own part of the hull.
+## They go out in a burst of steam as the sea closes over them.
+func _sync_fires(sh: World.Ship, rec: Dictionary) -> void:
+	var h := sh.hull
+	var fires: Array = rec["fires"]
+	var lit := 0
+	for f in fires:
+		if f != null:
+			lit += 1
+	var size := clampf(sh.beam * 0.3, 3.0, 9.0)
+	for i in fires.size():
+		var lvl: float = h.fire[i]
+		var f = fires[i]
+		if f == null:
+			if lvl < 0.06 or lit >= 6:
+				continue
+			var holder: Node3D = rec["node"]
+			if rec["aft"] != null and rec["fire_at"][i].z > rec["cut"]:
+				holder = rec["aft"]
+			f = fx.ship_fire(holder, rec["fire_at"][i], size)
+			f["under"] = false
+			fires[i] = f
+			lit += 1
+		var fl: Node3D = f["flames"]
+		var wp := fl.global_position
+		var under := wp.y < ocean.height(wp.x, wp.z) + 0.2
+		if under and not f["under"] and float(f["level"]) > 0.2:
+			fx.quench(wp, size)
+		f["under"] = under
+		fx.set_fire(f, 0.0 if under else lvl, lvl > 0.03 and not under)
+
+
+## Air and oil boiling up where she is going down: white water wherever her
+## hull meets the sea.
+func _sinking_foam(sh: World.Ship, rec: Dictionary, dt: float) -> void:
+	rec["foam"] -= dt
+	if rec["foam"] > 0.0:
+		return
+	rec["foam"] = randf_range(0.3, 0.6)
+	var node: Node3D = rec["node"]
+	var spots := []
+	var prev := Vector3.ZERO
+	for i in 25:
+		var z := ShipBuilder.z_of(i / 24.0, sh.length)
+		var xf := node.transform
+		if rec["aft"] != null and z > rec["cut"]:
+			xf = (rec["aft"] as Node3D).transform
+		var p := xf * Vector3(0, 0, z)
+		if absf(p.y) < 3.0 or (i > 0 and signf(p.y) != signf(prev.y)):
+			spots.append(p)
+		prev = p
+	if spots.is_empty():
+		return
+	var at: Vector3 = spots[randi() % spots.size()]
+	at += Vector3(randf_range(-0.5, 0.5), 0, randf_range(-0.5, 0.5)) * sh.beam
+	wakes.patch(at, sh.beam * randf_range(0.8, 1.4), 25.0, 0.9)
 
 
 func sync(dt: float, cam_pos: Vector3) -> void:
@@ -231,26 +408,32 @@ func sync(dt: float, cam_pos: Vector3) -> void:
 		if sh.dead:
 			if node.visible:
 				node.visible = false
+				if rec["aft"] != null:
+					rec["aft"].visible = false
 				wakes.free_ship(rec["wk"])
+				wakes.patch(node.global_position, sh.length * 0.3, 45.0, 0.9)
 				rec["bow"].emitting = false
 				for s in rec["smoke"]:
 					s.emitting = false
-				if rec["fire"]:
-					fx.stop_fire(rec["fire"])
+				for f in rec["fires"]:
+					if f != null:
+						fx.stop_fire(f)
 			continue
+		if sh.hull.mode == "explode" and rec["aft"] == null:
+			_split(sh, rec)
 		node.transform = _ship_xform(sh, rec, dt)
-		wakes.steer(rec["wk"], node.transform, sh.length * 0.5, sh.spd, sh.sinking < 0.6)
+		if rec["aft"] != null:
+			rec["aft"].transform = _half_xform(sh, rec, _base_xform(sh, rec, 0.0), false)
+		var whole := rec["aft"] == null
+		wakes.steer(rec["wk"], node.transform, sh.length * 0.5, sh.spd, sh.sinking < 0.6 and whole)
 		rec["bow"].global_position = node.transform * Vector3(0, 0.6, -sh.length * 0.47)
 		rec["bow"].emitting = sh.spd > 8.0 and sh.sinking < 0.2
 		fx.aim_spray(rec["bow"], node.transform, sh.spd)
 		for s in rec["smoke"]:
-			s.emitting = sh.sinking < 0.6
-		if sh.fire > 0.05 and rec["fire"] == null:
-			var fp := Vector3(randf_range(-sh.beam * 0.2, sh.beam * 0.2), float(node.get_meta("deck_y", 9.0)) + 0.5,
-				randf_range(-sh.length * 0.2, sh.length * 0.2))
-			rec["fire"] = fx.ship_fire(node, fp, clampf(sh.beam * 0.35, 3.0, 9.0))
-		if rec["fire"]:
-			fx.set_fire(rec["fire"], sh.fire if sh.sinking < 0.85 else 0.0, sh.fire > 0.03)
+			s.emitting = sh.sinking < 0.6 and whole and (s as Node3D).global_position.y > 1.0
+		_sync_fires(sh, rec)
+		if sh.sinking > 0.0:
+			_sinking_foam(sh, rec, dt)
 		_aim_turrets(sh, rec, dt)
 	_sync_planes(dt)
 	_sync_shells()
@@ -270,7 +453,7 @@ func _aim_turrets(sh: World.Ship, rec: Dictionary, dt: float) -> void:
 			var ok := (dir > 0 and absf(rel) < 150.0) or (dir < 0 and absf(rel) > 30.0)
 			if ok:
 				want = -deg_to_rad(rel)
-				var e := U.elev_for_range(r, 800.0)
+				var e := U.elev_for_range(r, 800.0, 150.0)
 				elev = deg_to_rad(maxf(e, 0.5))
 		var cur: float = tn.rotation.y
 		var diff := wrapf(want - cur, -PI, PI)
@@ -305,7 +488,9 @@ func _sync_sub(dt: float) -> void:
 	sub_motion["pitch"] = lerpf(sub_motion["pitch"], pitch, k)
 	sub_motion["roll"] = lerpf(sub_motion["roll"], roll, k * 0.8)
 	var y: float = -s.depth + sub_motion["heave"]
-	sub_node.transform = Transform3D(Basis.from_euler(Vector3(sub_motion["pitch"], U.yaw(s.hdg), sub_motion["roll"]),
+	# The diving angle, + = bow up.
+	var trim := deg_to_rad(s.pitch)
+	sub_node.transform = Transform3D(Basis.from_euler(Vector3(sub_motion["pitch"] + trim, U.yaw(s.hdg), sub_motion["roll"]),
 		EULER_ORDER_YXZ), Vector3(p.x, y, p.z))
 	var kn := absf(s.spd)
 	wakes.steer(sub_wk, sub_node.transform, L * 0.5, kn, s.depth < 3.0)
@@ -436,7 +621,19 @@ func handle_event(ev: Dictionary) -> void:
 				var beam: float = node.get_meta("beam", 20.0)
 				pos = node.global_position + side * signf(side.dot(to_sub)) * beam * 0.55
 				pos.y = 0.0
-			fx.explosion(pos, ev["size"], ev.get("kind", ""))
+			match ev.get("kind", ""):
+				"magazine":
+					# Where along her length the magazine was.
+					if ships.has(ev.get("ship", -1)):
+						var sh_rec: Dictionary = ships[ev["ship"]]
+						var sh_node: Node3D = sh_rec["node"]
+						var L: float = float(ev["size"]) * 7.0
+						pos = sh_node.global_transform * Vector3(0, 3.0, ShipBuilder.z_of(float(ev.get("u", 0.5)), L))
+					fx.magazine(pos, ev["size"])
+				"bounce":
+					fx.ricochet(pos)
+				_:
+					fx.explosion(pos, ev["size"], ev.get("kind", ""))
 		"dc":
 			fx.depth_charge(s3(ev["pos"]), ev["depth"])
 		"muzzle":

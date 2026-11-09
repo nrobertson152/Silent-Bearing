@@ -1,5 +1,5 @@
 ## Paint schemes and deck finishes for every ship and boat, built on
-## shaders/paint.gdshader and shaders/deck.gdshader.
+## shaders/paint.gdshader, shaders/deck.gdshader and shaders/plain.gdshader.
 ##
 ## Each target wears the camouflage she carried at the time of the attack
 ## where that is known: Measure 12 graded bands on Yorktown at Midway,
@@ -158,6 +158,16 @@ static func deck_mat(kind: String, rust: float, seed_v: float) -> ShaderMaterial
 	return m
 
 
+## Plain paint for small fittings, which can be torn in two with the hull.
+static func plain(color: Color, rough := 0.85, metal := 0.0) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = _shader("res://shaders/plain.gdshader")
+	m.set_shader_parameter("albedo", color)
+	m.set_shader_parameter("rough", rough)
+	m.set_shader_parameter("metal", metal)
+	return m
+
+
 ## The full material set ShipBuilder expects for one ship.
 static func ship(key: String, lay: Dictionary, L: float) -> Dictionary:
 	var s := scheme(key)
@@ -181,13 +191,13 @@ static func ship(key: String, lay: Dictionary, L: float) -> Dictionary:
 		"deck": deck_mat(String(s.get("deck", "teak_rn")), rust, seed_v),
 		"flight": deck_mat(flight_kind, rust, seed_v + 3.0),
 		"metal": fitting,
-		"black": MeshKit.mat(Color(0.04, 0.04, 0.04), 0.9),
-		"window": MeshKit.mat(Color(0.04, 0.05, 0.06), 0.12, 0.2),
-		"white": MeshKit.mat(Color(0.86, 0.86, 0.82), 0.8),
-		"boat": MeshKit.mat(Color(0.70, 0.71, 0.68), 0.8),
-		"red": MeshKit.mat(Color(0.72, 0.10, 0.10), 0.8),
-		"wood": MeshKit.mat(Color(0.45, 0.33, 0.22), 0.9),
-		"plane": MeshKit.mat(Color(0.32, 0.38, 0.30) if String(lay.get("paint", "")).begins_with("jp") else Color(0.36, 0.43, 0.50), 0.7),
+		"black": plain(Color(0.04, 0.04, 0.04), 0.9),
+		"window": plain(Color(0.04, 0.05, 0.06), 0.12, 0.2),
+		"white": plain(Color(0.86, 0.86, 0.82), 0.8),
+		"boat": plain(Color(0.70, 0.71, 0.68), 0.8),
+		"red": plain(Color(0.72, 0.10, 0.10), 0.8),
+		"wood": plain(Color(0.45, 0.33, 0.22), 0.9),
+		"plane": plain(Color(0.32, 0.38, 0.30) if String(lay.get("paint", "")).begins_with("jp") else Color(0.36, 0.43, 0.50), 0.7),
 	}
 
 

@@ -1,6 +1,8 @@
 ## Math helpers. Simulation space is metres with x east and y north. Bearings
 ## and headings are degrees clockwise from north. Godot space maps north to -Z.
 
+const Ballistics := preload("res://scripts/sim/ballistics.gd")
+
 const KN := 0.514444
 
 
@@ -43,13 +45,11 @@ static func gauss() -> float:
 	return randfn(0.0, 1.0)
 
 
-## Elevation angle (degrees) that lands a shell at range r on flat water, or -1 if out of reach.
-static func elev_for_range(r: float, v: float) -> float:
-	var s := 9.81 * r / (v * v)
-	if s > 1.0:
-		return -1.0
-	return rad_to_deg(0.5 * asin(s))
+## Elevation angle (degrees) that lands a shell at range r on flat water, or -1 if
+## out of reach. Shells feel air drag (scripts/sim/ballistics.gd).
+static func elev_for_range(r: float, v: float, cal := 100.0) -> float:
+	return Ballistics.elev_for_range(r, v, cal)
 
 
-static func range_for_elev(e: float, v: float) -> float:
-	return v * v * sin(deg_to_rad(2.0 * e)) / 9.81
+static func range_for_elev(e: float, v: float, cal := 100.0) -> float:
+	return Ballistics.range_for_elev(e, v, cal)

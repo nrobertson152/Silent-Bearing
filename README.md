@@ -81,9 +81,16 @@ You start at periscope depth with the target over the horizon, somewhere ahead.
    set the running depth. The TDC (`8`) tells you if it's too deep.
 5. **Fire.** Close to 1,000 to 2,500 metres off her beam and press `Space` for one
    torpedo or `X` for a spread of three. Warheads don't arm for the first 250 metres.
-6. **Survive.** When escorts turn on you, go deep (`F`, or `C` to crash dive), slow to
+6. **Watch her.** Each hit floods compartments. She lists toward the side you hit,
+   settles and trims by the head or stern, slows if you hit her engine rooms and
+   circles if you jam her rudder. She goes down when her buoyancy is gone, rolls over
+   if she lists too far, or blows apart if a hit or a fire reaches a magazine. Hits
+   all down one side sink her soonest.
+7. **Survive.** When escorts turn on you, go deep (`F`, or `C` to crash dive), slow to
    1/3 or stop, and turn. Below the thermal layer their sonar works half as well.
-   Don't stay below test depth for long.
+   Don't stay below test depth for long. The boat changes depth on her planes, which
+   need way on: stopped, she can only drift up or down slowly on the trim tanks. If
+   she's flooding and heavy, keep your speed up or surface.
 
 ### On the surface
 
@@ -152,6 +159,24 @@ she's badly hurt.
   test and crush depth, flooding and pumps, and damage to individual systems
   (periscope, hydrophones, diesels, motors, planes, tubes, deck gun, pumps) that the
   crew repairs over time.
+- **Trim and buoyancy:** submerged, the diving officer changes depth by angling the
+  boat on her planes (you see the down angle outside and feel it inside), helped by
+  the trim tanks, which are slow. The planes only work with way on. A crash dive
+  floods the negative tank and takes a steep angle. Water you take aboard makes her
+  heavy: the pumps can carry a little, beyond that she needs speed and an up angle to
+  hold depth, or main ballast blown.
+- **Warships:** each ship is split into compartments down both sides. Torpedoes and
+  shells hole them and the water spreads: through damaged bulkheads, over the top
+  once she settles, slowed by her pumps and damage control (better in some navies
+  than others) and offset by counterflooding. She lists, trims and settles as she
+  fills, loses speed when her machinery floods, and can be left circling with a
+  jammed rudder. Fires spread and burn on, and a magazine hit, a fire reaching one or
+  a torpedo under a destroyer breaks her in two. She founders, capsizes or blows up
+  depending on how she was hurt, and every target is tuned to take about the number
+  of hits the briefing gives.
+- **Gunnery:** shells fly through air that slows them, so they fall short and steep
+  at long range, and armour stops them by calibre, striking speed and angle. A
+  4-inch round holes a destroyer but bounces off a battleship's belt.
 - **Torpedoes:** speed, range, wake or no wake, arming distance, running depth versus
   target draft, dud rates, gyro angles up to 90 degrees.
 - **Escorts:** destroyers and sub-chasers with sonar and hydrophones, hunting and
@@ -180,8 +205,10 @@ project.godot              Godot project
 scenes/main.tscn           entry scene (everything else is built in code)
 scripts/
   data.gd                  navies, boats, aircraft, targets and ship layouts
-  util.gd                  bearing and ballistics helpers
+  util.gd                  bearing and aiming helpers
   sim/world.gd             the simulation: no rendering, fully testable
+  sim/damage.gd            warship flooding, stability, fires, magazines and machinery
+  sim/ballistics.gd        shell flight with air drag, and armour penetration
   build/                   procedural models and paint: warships, your boat, aircraft, crew, islands
   view/                    ocean, wake map, sky, effects, graphics settings and the 3D world
   interior/                walkable eight-compartment interior, its textures and props, the player
@@ -191,7 +218,7 @@ scripts/
   game.gd                  modes, cameras, input and the game loop
 shaders/                   ocean, sky, wake map, paint, decks, smoke and fire
 tests/run_tests.gd         headless simulation tests
-tools/                     screenshot tools, plus walk and deck tests
+tools/                     screenshot tools, walk and deck tests, damage calibration
 ```
 
 Every model, sound and texture is generated in code, so there are no binary assets.
@@ -205,6 +232,7 @@ godot --headless --path . --import
 godot --headless --path . -s tests/run_tests.gd
 godot --headless --path . -s tools/walk_test.gd -- us shokaku
 godot --headless --path . -s tools/deck_test.gd -- - us shokaku
+godot --headless --path . -s tools/sink_test.gd
 ```
 
 ### Rendering previews
@@ -221,7 +249,13 @@ xvfb-run godot --path . --fixed-fps 10 -s tools/game_preview.gd -- /tmp/out de b
 xvfb-run godot --path . -s tools/interior_preview.gd -- /tmp/out us shokaku
 xvfb-run godot --path . --fixed-fps 10 -s tools/sea_preview.gd -- /tmp/out us shokaku [day|dusk|night]
 xvfb-run godot --path . --fixed-fps 20 -s tools/fx_preview.gd -- /tmp/out torpedo
+xvfb-run godot --path . --fixed-fps 10 -s tools/sink_preview.gd -- /tmp/out de hood magazine
 ```
+
+`sink_preview.gd` shows a ship going down: `list` (one hit, still afloat), `founder`,
+`capsize`, `magazine` or `broken` (an escort broken in two). To check that every
+target still takes about the hits its briefing promises after changing the damage
+model, run `godot --headless --path . -s tools/damage_calibration.gd`.
 
 ## License
 

@@ -83,6 +83,7 @@ static func build(lay_key: String, L: float, B: float, D: float) -> Node3D:
 	var mi := MeshInstance3D.new()
 	mi.mesh = k.commit()
 	root.add_child(mi)
+	root.set_meta("hull_mesh", mi)
 	root.set_meta("turrets", turret_nodes)
 	root.set_meta("funnels", funnel_tops)
 	var top := 30.0

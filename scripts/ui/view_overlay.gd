@@ -197,7 +197,7 @@ func _gun(w: World, c: Vector2, sz: Vector2) -> void:
 	for i in range(1, 6):
 		draw_line(c + Vector2(-6, 30 + i * 12), c + Vector2(6, 30 + i * 12), col, 1.0)
 	var g: Dictionary = w.nat["gun"]
-	var rng := U.range_for_elev(maxf(s.gun_elev, 0.0), float(g["v"]))
+	var rng := U.range_for_elev(maxf(s.gun_elev, 0.0), float(g["v"]), float(g["cal"]))
 	var st := w.gun_ready()
 	var blocked := w.gun_blocked(s.gun_trav)
 	var lines := [

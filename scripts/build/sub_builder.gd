@@ -4,9 +4,10 @@
 ## Model space: bow toward -Z, waterline at y = 0 when surfaced.
 
 const MeshKit := preload("res://scripts/build/mesh_kit.gd")
+const Paint := preload("res://scripts/build/paint.gd")
 
 
-static func materials(nation: String) -> Dictionary:
+static func materials(nation: String, length := 80.0) -> Dictionary:
 	var hull := Color(0.12, 0.13, 0.14)
 	var deck := Color(0.20, 0.20, 0.21)
 	match nation:
@@ -19,11 +20,12 @@ static func materials(nation: String) -> Dictionary:
 		"jp":
 			hull = Color(0.09, 0.09, 0.10)
 			deck = Color(0.30, 0.25, 0.20)
+	var painted := Paint.sub(nation, hull, deck, length)
 	return {
-		"hull": MeshKit.mat(hull, 0.75, 0.15),
-		"deck": MeshKit.mat(deck, 0.95),
-		"bottom": MeshKit.mat(Color(0.38, 0.12, 0.10), 0.9),
-		"metal": MeshKit.mat(hull.lightened(0.12), 0.55, 0.4),
+		"hull": painted["hull"],
+		"deck": painted["deck"],
+		"bottom": painted["bottom"],
+		"metal": painted["metal"],
 		"gun": MeshKit.mat(Color(0.22, 0.23, 0.24) if nation != "de" else Color(0.40, 0.42, 0.44), 0.5, 0.5),
 		"black": MeshKit.mat(Color(0.03, 0.03, 0.03), 0.9),
 		"glass": MeshKit.mat(Color(0.2, 0.25, 0.3), 0.05, 0.4),
@@ -37,7 +39,7 @@ static func build(nat: Dictionary) -> Node3D:
 	var style: String = sd["style"]
 	var L: float = sd["len"]
 	var B: float = sd["beam"]
-	var mats := materials(nat["id"])
+	var mats := materials(nat["id"], L)
 	var root := Node3D.new()
 	root.name = "PlayerSub"
 	var k := MeshKit.new(mats)

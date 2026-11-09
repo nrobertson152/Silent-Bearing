@@ -6,57 +6,11 @@
 
 const GameData := preload("res://scripts/data.gd")
 const MeshKit := preload("res://scripts/build/mesh_kit.gd")
+const Paint := preload("res://scripts/build/paint.gd")
 const PlaneBuilder := preload("res://scripts/build/plane_builder.gd")
 
 const STATIONS := [0.0, 0.008, 0.02, 0.04, 0.07, 0.11, 0.16, 0.22, 0.29, 0.37, 0.46, 0.55, 0.64,
 	0.72, 0.79, 0.85, 0.90, 0.94, 0.97, 0.99, 1.0]
-
-
-static func paint(scheme: String) -> Dictionary:
-	var hull := Color(0.44, 0.46, 0.48)
-	var sup := Color(0.50, 0.52, 0.54)
-	var deck := Color(0.45, 0.40, 0.33)
-	var flight := Color(0.45, 0.38, 0.29)
-	match scheme:
-		"jp":
-			hull = Color(0.36, 0.38, 0.40)
-			sup = Color(0.40, 0.42, 0.44)
-			deck = Color(0.38, 0.30, 0.23)
-		"jp_cv":
-			hull = Color(0.33, 0.35, 0.36)
-			sup = Color(0.36, 0.38, 0.39)
-			deck = Color(0.38, 0.30, 0.23)
-			flight = Color(0.50, 0.39, 0.27)
-		"us", "us_cv":
-			hull = Color(0.19, 0.24, 0.31)
-			sup = Color(0.22, 0.27, 0.34)
-			deck = Color(0.20, 0.24, 0.29)
-			flight = Color(0.23, 0.26, 0.30)
-		"uk":
-			hull = Color(0.46, 0.48, 0.50)
-			sup = Color(0.56, 0.58, 0.60)
-			deck = Color(0.53, 0.46, 0.36)
-			flight = Color(0.36, 0.37, 0.37)
-		"de":
-			hull = Color(0.50, 0.52, 0.54)
-			sup = Color(0.60, 0.62, 0.64)
-			deck = Color(0.50, 0.41, 0.30)
-	return {
-		"hull": MeshKit.mat(hull, 0.8),
-		"boot": MeshKit.mat(Color(0.07, 0.07, 0.08), 0.7),
-		"bottom": MeshKit.mat(Color(0.40, 0.13, 0.10), 0.9),
-		"super": MeshKit.mat(sup, 0.8),
-		"deck": MeshKit.mat(deck, 0.95),
-		"flight": MeshKit.mat(flight, 0.92),
-		"metal": MeshKit.mat(sup.darkened(0.18), 0.6, 0.25),
-		"black": MeshKit.mat(Color(0.04, 0.04, 0.04), 0.9),
-		"window": MeshKit.mat(Color(0.05, 0.06, 0.07), 0.15, 0.1),
-		"white": MeshKit.mat(Color(0.86, 0.86, 0.82), 0.8),
-		"boat": MeshKit.mat(Color(0.70, 0.71, 0.68), 0.8),
-		"red": MeshKit.mat(Color(0.72, 0.10, 0.10), 0.8),
-		"wood": MeshKit.mat(Color(0.45, 0.33, 0.22), 0.9),
-		"plane": MeshKit.mat(Color(0.32, 0.38, 0.30) if scheme.begins_with("jp") else Color(0.36, 0.43, 0.50), 0.7),
-	}
 
 
 static func z_of(u: float, L: float) -> float:
@@ -96,7 +50,7 @@ static func deck_h(lay: Dictionary, u: float) -> float:
 
 static func build(lay_key: String, L: float, B: float, D: float) -> Node3D:
 	var lay := GameData.layout(lay_key)
-	var mats := paint(lay.get("paint", "grey"))
+	var mats := Paint.ship(lay_key, lay, L)
 	var root := Node3D.new()
 	root.name = "Ship"
 	var k := MeshKit.new(mats)
@@ -135,6 +89,8 @@ static func build(lay_key: String, L: float, B: float, D: float) -> Node3D:
 	if lay.has("tower"):
 		top = float(lay["tower"]["h"])
 	root.set_meta("height", top)
+	root.set_meta("beam", B)
+	root.set_meta("deck_y", float(lay["deck"]["h"]) if lay["hull"] == "cv" else float(lay["fb"]))
 	return root
 
 

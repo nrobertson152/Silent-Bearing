@@ -4,6 +4,7 @@ extends Node
 ## and sound.
 
 const GameData := preload("res://scripts/data.gd")
+const Gfx := preload("res://scripts/view/gfx.gd")
 const Hud := preload("res://scripts/ui/hud.gd")
 const Deck := preload("res://scripts/deck/deck.gd")
 const Interior := preload("res://scripts/interior/interior.gd")
@@ -60,6 +61,8 @@ var near_station := {}
 
 
 func _ready() -> void:
+	Gfx.load_settings()
+	Gfx.apply_viewport(get_viewport())
 	sfx = Sfx.new()
 	add_child(sfx)
 	world_cam = Camera3D.new()
@@ -76,6 +79,7 @@ func _ready() -> void:
 	interior_env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	interior_env.glow_enabled = true
 	interior_env.glow_intensity = 0.4
+	Gfx.setup_interior_env(interior_env)
 	hud = Hud.new()
 	add_child(hud)
 	hud.build(self)
@@ -376,6 +380,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event is InputEventKey and event.pressed and not event.echo:
 			if event.keycode == KEY_F11:
 				_fullscreen()
+			elif event.keycode == KEY_F9:
+				_cycle_quality()
 			else:
 				menu.key(event.keycode)
 		return
@@ -420,6 +426,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			hud.help.visible = not hud.help.visible
 		KEY_F11:
 			_fullscreen()
+		KEY_F9:
+			_cycle_quality()
 		KEY_UP:
 			w.set_telegraph(s.tel + 1)
 		KEY_DOWN:
@@ -551,6 +559,18 @@ func _cycle_tc() -> void:
 				nxt = 1
 				break
 	world.tc = nxt
+
+
+## F9: Low, Medium, High. Saved for next time.
+func _cycle_quality() -> void:
+	var q := Gfx.cycle()
+	Gfx.apply_viewport(get_viewport())
+	Gfx.setup_interior_env(interior_env)
+	if view != null and is_instance_valid(view):
+		view.refresh_quality()
+	if world != null and in_patrol:
+		world.report("Graphics quality: %s. Sea and wake detail change from the next patrol.%s" % [q,
+			"" if Gfx.advanced() else " (OpenGL fallback: screen-space effects unavailable.)"])
 
 
 func _fullscreen() -> void:

@@ -3,6 +3,7 @@ extends Node3D
 ## projectile, plus their smoke, wakes and fires. Reads World each frame.
 
 const Fx := preload("res://scripts/view/fx.gd")
+const Gfx := preload("res://scripts/view/gfx.gd")
 const IslandBuilder := preload("res://scripts/build/island_builder.gd")
 const MeshKit := preload("res://scripts/build/mesh_kit.gd")
 const Ocean := preload("res://scripts/view/ocean.gd")
@@ -10,29 +11,33 @@ const PlaneBuilder := preload("res://scripts/build/plane_builder.gd")
 const ShipBuilder := preload("res://scripts/build/ship_builder.gd")
 const SubBuilder := preload("res://scripts/build/sub_builder.gd")
 const U := preload("res://scripts/util.gd")
+const Wakes := preload("res://scripts/view/wakes.gd")
 const World := preload("res://scripts/sim/world.gd")
 
 const PAL := {
-	"day": {"top": Color(0.28, 0.46, 0.66), "hor": Color(0.68, 0.75, 0.79), "ground": Color(0.12, 0.17, 0.19),
-		"sun": Color(1.0, 0.95, 0.86), "sun_e": 1.25, "amb": 0.55, "deep": Color(0.02, 0.08, 0.11),
-		"shallow": Color(0.04, 0.15, 0.18), "under": Color(0.03, 0.12, 0.14), "fog": 0.00011,
-		"cloud": Color(0.92, 0.92, 0.94), "cover": 0.45, "sun_dir": Vector3(0.45, 0.62, -0.64), "stars": 0.0,
-		"moon": 0.0, "amp": 1.0, "smoke": Color(0.5, 0.5, 0.5)},
-	"dusk": {"top": Color(0.16, 0.20, 0.34), "hor": Color(0.86, 0.56, 0.38), "ground": Color(0.08, 0.08, 0.10),
-		"sun": Color(1.0, 0.62, 0.35), "sun_e": 0.85, "amb": 0.35, "deep": Color(0.03, 0.05, 0.08),
-		"shallow": Color(0.10, 0.12, 0.15), "under": Color(0.02, 0.06, 0.08), "fog": 0.00018,
-		"cloud": Color(0.75, 0.48, 0.38), "cover": 0.5, "sun_dir": Vector3(-0.85, 0.06, -0.3), "stars": 0.15,
-		"moon": 0.0, "amp": 1.2, "smoke": Color(0.25, 0.22, 0.22)},
+	"day": {"top": Color(0.24, 0.42, 0.64), "hor": Color(0.68, 0.75, 0.79), "ground": Color(0.12, 0.17, 0.19),
+		"sun": Color(1.0, 0.95, 0.86), "sun_e": 1.6, "amb": 0.45, "deep": Color(0.014, 0.06, 0.095),
+		"shallow": Color(0.04, 0.17, 0.19), "under": Color(0.03, 0.12, 0.14), "fog": 0.00009,
+		"cloud": Color(0.95, 0.95, 0.96), "cover": 0.45, "sun_dir": Vector3(0.45, 0.62, -0.64), "stars": 0.0,
+		"moon": 0.0, "amp": 1.0, "smoke": Color(0.42, 0.41, 0.4), "exposure": 1.0},
+	"dusk": {"top": Color(0.14, 0.18, 0.33), "hor": Color(0.9, 0.56, 0.36), "ground": Color(0.08, 0.08, 0.10),
+		"sun": Color(1.0, 0.6, 0.32), "sun_e": 1.2, "amb": 0.3, "deep": Color(0.02, 0.035, 0.06),
+		"shallow": Color(0.10, 0.11, 0.13), "under": Color(0.02, 0.06, 0.08), "fog": 0.00016,
+		"cloud": Color(0.8, 0.5, 0.4), "cover": 0.5, "sun_dir": Vector3(-0.85, 0.06, -0.3), "stars": 0.15,
+		"moon": 0.0, "amp": 1.2, "smoke": Color(0.22, 0.2, 0.2), "exposure": 1.1},
 	"night": {"top": Color(0.012, 0.02, 0.04), "hor": Color(0.11, 0.14, 0.20), "ground": Color(0.01, 0.015, 0.02),
-		"sun": Color(0.62, 0.70, 0.88), "sun_e": 0.45, "amb": 0.35, "deep": Color(0.01, 0.02, 0.035),
-		"shallow": Color(0.03, 0.06, 0.09), "under": Color(0.005, 0.02, 0.03), "fog": 0.00030,
+		"sun": Color(0.62, 0.70, 0.88), "sun_e": 0.5, "amb": 0.34, "deep": Color(0.006, 0.014, 0.026),
+		"shallow": Color(0.03, 0.06, 0.09), "under": Color(0.005, 0.02, 0.03), "fog": 0.00028,
 		"cloud": Color(0.10, 0.11, 0.14), "cover": 0.4, "sun_dir": Vector3(-0.4, 0.22, 0.8), "stars": 1.0,
-		"moon": 1.0, "amp": 0.8, "smoke": Color(0.12, 0.12, 0.13)},
+		"moon": 1.0, "amp": 0.8, "smoke": Color(0.1, 0.1, 0.11), "exposure": 1.45},
 }
+## Sea state by where the target is met: open ocean, near a coast, a strait, a harbour.
+const SEA := {"open": 1.0, "coast": 0.75, "strait": 0.55, "harbor": 0.3}
 
 var world: World
 var pal: Dictionary
 var ocean: Ocean
+var wakes: Wakes
 var fx: Fx
 var env: Environment
 var sky_mat: ShaderMaterial
@@ -43,38 +48,46 @@ var planes := {}
 var shells := {}
 var torps := {}
 var time := 0.0
-var m_wake: StandardMaterial3D
-var m_smoke: StandardMaterial3D
-var m_fire: StandardMaterial3D
+var wind := Vector3(1, 0, 0)
+var m_smoke: Material
 var m_tracer: StandardMaterial3D
 var m_shell: StandardMaterial3D
-var flat_quad: QuadMesh
-var sub_wake: CPUParticles3D
+var sub_wk: Dictionary
+var scope_wk: Dictionary
 var sub_bow: CPUParticles3D
 var feather: CPUParticles3D
+var sub_motion := {"heave": 0.0, "pitch": 0.0, "roll": 0.0}
 var aim_scope := false
 
 
 func setup(w: World) -> void:
+	Gfx.load_settings()
 	world = w
 	pal = PAL[w.tod]
+	# A steady wind for the whole patrol: it sets the waves, the foam and the smoke.
+	var wind_deg := float(hash(String(w.spec.get("id", "demo"))) % 360)
+	wind = Vector3(cos(deg_to_rad(wind_deg)), 0, sin(deg_to_rad(wind_deg)))
 	_environment()
 	ocean = Ocean.new()
 	add_child(ocean)
 	ocean.set_colors(pal["deep"], pal["shallow"], pal["under"], pal["amp"])
+	ocean.set_sea(float(pal["amp"]) * float(SEA.get(w.spec.get("terrain", "open"), 1.0)), wind_deg)
+	ocean.set_sun(pal["sun_dir"], pal["sun"], pal["sun_e"])
+	wakes = Wakes.new()
+	add_child(wakes)
 	fx = Fx.new()
 	fx.night = w.tod == "night"
+	fx.wind = wind
+	fx.wakes = wakes
 	add_child(fx)
-	m_wake = Fx._pmat(Color(0.92, 0.95, 0.95), false)
-	m_wake.billboard_mode = BaseMaterial3D.BILLBOARD_DISABLED
-	m_smoke = Fx._pmat(pal["smoke"], false)
-	m_fire = Fx._pmat(Color(1.0, 0.55, 0.2), true)
+	m_smoke = fx.smoke_mat(pal["smoke"])
 	m_tracer = StandardMaterial3D.new()
 	m_tracer.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m_tracer.albedo_color = Color(1.0, 0.75, 0.35)
+	m_tracer.emission_enabled = true
+	m_tracer.emission = Color(1.0, 0.7, 0.3)
+	m_tracer.emission_energy_multiplier = 2.0
 	m_shell = MeshKit.mat(Color(0.15, 0.15, 0.15), 0.6)
-	flat_quad = QuadMesh.new()
-	flat_quad.orientation = PlaneMesh.FACE_Y
 	for isl in w.islands:
 		var style := "north" if w.spec["nation"] in ["de", "uk"] else "south"
 		var mi := IslandBuilder.build(isl["r"], isl["h"], isl["seed"], style)
@@ -82,9 +95,13 @@ func setup(w: World) -> void:
 		mi.position = U.to3(isl["pos"])
 	sub_node = SubBuilder.build(w.nat)
 	add_child(sub_node)
-	sub_wake = _wake_emitter(float(w.nat["sub"]["beam"]), 50)
-	sub_bow = _spray_emitter()
-	feather = _spray_emitter()
+	var L: float = w.nat["sub"]["len"]
+	var B: float = w.nat["sub"]["beam"]
+	sub_wk = wakes.ship(sub_node, B, L, 40.0)
+	scope_wk = {"trail": wakes.trail(1.4, 14.0, 40, 0.8), "arms": [wakes.arm(1.0, 1.6, 9.0, 30), wakes.arm(-1.0, 1.6, 9.0, 30)]}
+	sub_bow = fx.bow_spray(B)
+	feather = fx.bow_spray(0.6)
+	feather.amount = 24
 	for sh in w.ships:
 		_add_ship(sh)
 
@@ -104,22 +121,16 @@ func _environment() -> void:
 	sky_mat.set_shader_parameter("moon_dir", pal["sun_dir"])
 	sky_mat.set_shader_parameter("cloud_col", pal["cloud"])
 	sky_mat.set_shader_parameter("cloud_cover", pal["cover"])
+	sky_mat.set_shader_parameter("wind", Vector2(wind.x, wind.z))
 	sky.sky_material = sky_mat
-	sky.process_mode = Sky.PROCESS_MODE_REALTIME
+	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL if Gfx.advanced() else Sky.PROCESS_MODE_REALTIME
+	sky.radiance_size = Sky.RADIANCE_SIZE_256
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = pal["amb"]
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.tonemap_white = 6.0
-	env.fog_enabled = true
-	env.fog_light_color = pal["hor"]
-	env.fog_density = pal["fog"]
-	env.fog_sky_affect = 0.0
-	env.glow_enabled = true
-	env.glow_intensity = 0.6
-	env.glow_bloom = 0.05
+	Gfx.setup_env(env, pal, world.tod == "night")
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
@@ -128,10 +139,15 @@ func _environment() -> void:
 	sun.look_at_from_position(Vector3.ZERO, -d, Vector3.UP)
 	sun.light_color = pal["sun"]
 	sun.light_energy = pal["sun_e"]
-	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 500.0
 	sun.light_cull_mask = 1
+	Gfx.setup_sun(sun)
 	add_child(sun)
+
+
+## Re-applies the quality preset (F9) to the running scene.
+func refresh_quality() -> void:
+	Gfx.setup_env(env, pal, world.tod == "night")
+	Gfx.setup_sun(sun)
 
 
 func underwater_env() -> Environment:
@@ -144,106 +160,66 @@ func underwater_env() -> Environment:
 	e.fog_enabled = true
 	e.fog_light_color = pal["under"]
 	e.fog_density = 0.035
+	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	if Gfx.forward_plus() and Gfx.quality >= 2:
+		# Light shafts hanging in the water.
+		e.volumetric_fog_enabled = true
+		e.volumetric_fog_density = 0.02
+		e.volumetric_fog_albedo = Color(0.5, 0.75, 0.75)
+		e.volumetric_fog_anisotropy = 0.7
+		e.volumetric_fog_length = 120.0
+		e.volumetric_fog_sky_affect = 0.0
 	return e
-
-
-func _wake_emitter(width: float, amount: int) -> CPUParticles3D:
-	var p := CPUParticles3D.new()
-	p.mesh = flat_quad
-	p.material_override = m_wake
-	p.amount = amount
-	p.lifetime = 22.0
-	p.local_coords = false
-	p.direction = Vector3.UP
-	p.spread = 0.0
-	p.initial_velocity_min = 0.0
-	p.initial_velocity_max = 0.2
-	p.gravity = Vector3.ZERO
-	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	p.emission_box_extents = Vector3(width * 0.5, 0.0, 2.0)
-	p.scale_amount_min = width * 0.5
-	p.scale_amount_max = width * 0.9
-	var curve := Curve.new()
-	curve.add_point(Vector2(0, 0.6))
-	curve.add_point(Vector2(1, 3.0))
-	p.scale_amount_curve = curve
-	p.color_ramp = Fx.ramp(Color(1, 1, 1, 0.55), Color(1, 1, 1, 0.0))
-	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	p.emitting = false
-	add_child(p)
-	return p
-
-
-func _spray_emitter() -> CPUParticles3D:
-	var p := CPUParticles3D.new()
-	p.mesh = QuadMesh.new()
-	p.material_override = fx.m_spray
-	p.amount = 30
-	p.lifetime = 1.4
-	p.local_coords = false
-	p.direction = Vector3.UP
-	p.spread = 35.0
-	p.initial_velocity_min = 1.5
-	p.initial_velocity_max = 4.0
-	p.gravity = Vector3(0, -9.8, 0)
-	p.scale_amount_min = 0.5
-	p.scale_amount_max = 1.4
-	p.color_ramp = Fx.ramp(Color(1, 1, 1, 0.7), Color(1, 1, 1, 0))
-	p.emitting = false
-	add_child(p)
-	return p
-
-
-func _smoke_emitter(parent: Node3D, pos: Vector3, amount: int, mat: Material, size: float) -> CPUParticles3D:
-	var p := CPUParticles3D.new()
-	p.mesh = QuadMesh.new()
-	p.material_override = mat
-	p.amount = amount
-	p.lifetime = 12.0
-	p.local_coords = false
-	p.direction = Vector3.UP
-	p.spread = 12.0
-	p.initial_velocity_min = 2.0
-	p.initial_velocity_max = 4.0
-	p.gravity = Vector3(1.4, 0.5, 0.6)
-	p.damping_min = 0.2
-	p.damping_max = 0.5
-	p.scale_amount_min = size
-	p.scale_amount_max = size * 1.6
-	var curve := Curve.new()
-	curve.add_point(Vector2(0, 0.6))
-	curve.add_point(Vector2(1, 4.0))
-	p.scale_amount_curve = curve
-	p.color_ramp = Fx.ramp(Color(1, 1, 1, 0.55), Color(1, 1, 1, 0.0))
-	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	p.position = pos
-	parent.add_child(p)
-	return p
 
 
 func _add_ship(sh: World.Ship) -> void:
 	var node := ShipBuilder.build(sh.layout, sh.length, sh.beam, sh.draft)
 	add_child(node)
-	var rec := {"node": node, "turrets": node.get_meta("turrets"), "smoke": [], "fire": null, "fire_smoke": null}
+	var rec := {"node": node, "turrets": node.get_meta("turrets"), "smoke": [], "fire": null,
+		"heave": 0.0, "pitch": 0.0, "roll": 0.0}
 	for top in node.get_meta("funnels"):
-		rec["smoke"].append(_smoke_emitter(node, top + Vector3(0, 1.0, 0), 20, m_smoke, 3.0 if sh.type != "pc" else 1.5))
-	rec["wake"] = _wake_emitter(sh.beam, 70)
-	rec["bow"] = _spray_emitter()
+		rec["smoke"].append(fx.funnel_smoke(node, top + Vector3(0, 1.0, 0), m_smoke, 3.2 if sh.type != "pc" else 1.6))
+	rec["wk"] = wakes.ship(node, sh.beam, sh.length, clampf(sh.length * 0.25, 30.0, 60.0))
+	rec["bow"] = fx.bow_spray(sh.beam)
 	ships[sh.id] = rec
 
 
-func _ship_xform(sh: World.Ship) -> Transform3D:
-	var bob := sin(time * 0.6 + sh.id) * 0.15
+## Ship transform: riding the swell (big ships answer slowly and barely pitch),
+## plus listing and settling as she sinks.
+func _ship_xform(sh: World.Ship, rec: Dictionary, dt: float) -> Transform3D:
+	var p := Vector3(sh.pos.x, 0.0, -sh.pos.y)
+	var h := deg_to_rad(sh.hdg)
+	var fwd := Vector3(sin(h), 0, -cos(h))
+	var stbd := Vector3(cos(h), 0, sin(h))
+	var hl := sh.length * 0.36
+	var hw := sh.beam * 0.45
+	var y_bow := ocean.height(p.x + fwd.x * hl, p.z + fwd.z * hl)
+	var y_st := ocean.height(p.x - fwd.x * hl, p.z - fwd.z * hl)
+	var y_p := ocean.height(p.x - stbd.x * hw, p.z - stbd.z * hw)
+	var y_s := ocean.height(p.x + stbd.x * hw, p.z + stbd.z * hw)
+	var tau := 0.6 + sh.length / 110.0
+	var k := 1.0 - exp(-dt / tau)
+	rec["heave"] = lerpf(rec["heave"], (y_bow + y_st + y_p + y_s) * 0.25 * 0.85, k)
+	rec["pitch"] = lerpf(rec["pitch"], atan2(y_bow - y_st, hl * 2.0) * 0.8, k)
+	rec["roll"] = lerpf(rec["roll"], atan2(y_s - y_p, hw * 2.0) * 0.5, k * 0.7)
 	var drop := pow(sh.sinking, 1.4) * (sh.draft + 28.0)
-	var roll := sh.sinking * 0.9 * sh.sink_side + sin(time * 0.5 + sh.id * 2.0) * 0.012
-	var pitch := sh.sinking * 0.14 + sin(time * 0.43 + sh.id) * 0.006
+	var roll: float = rec["roll"] + sh.sinking * 0.9 * sh.sink_side + sin(time * 0.5 + sh.id * 2.0) * 0.012
+	var pitch: float = rec["pitch"] + sh.sinking * 0.14 + sin(time * 0.43 + sh.id) * 0.004
 	var b := Basis.from_euler(Vector3(pitch, U.yaw(sh.hdg), roll), EULER_ORDER_YXZ)
-	return Transform3D(b, Vector3(sh.pos.x, bob - drop, -sh.pos.y))
+	return Transform3D(b, Vector3(p.x, rec["heave"] - drop, p.z))
 
 
 func sync(dt: float, cam_pos: Vector3) -> void:
 	time += dt
+	var cam := get_viewport().get_camera_3d()
+	var cam_xf := Transform3D(Basis(), cam_pos)
+	if cam != null:
+		cam_xf = cam.global_transform
+		cam.cull_mask &= ~Wakes.MASK
+
 	ocean.follow(cam_pos, world.t if not world.demo else time)
+	wakes.follow(cam_xf)
+	ocean.set_wake(wakes.texture(), wakes.center, wakes.size)
 	sky_mat.set_shader_parameter("t", time)
 	fx.update(dt)
 	_sync_sub(dt)
@@ -255,32 +231,26 @@ func sync(dt: float, cam_pos: Vector3) -> void:
 		if sh.dead:
 			if node.visible:
 				node.visible = false
-				rec["wake"].emitting = false
+				wakes.free_ship(rec["wk"])
 				rec["bow"].emitting = false
 				for s in rec["smoke"]:
 					s.emitting = false
 				if rec["fire"]:
-					rec["fire"].emitting = false
-					rec["fire_smoke"].emitting = false
+					fx.stop_fire(rec["fire"])
 			continue
-		node.transform = _ship_xform(sh)
-		var stern := node.transform * Vector3(0, 0.3, sh.length * 0.48)
-		rec["wake"].global_position = stern
-		rec["wake"].emitting = sh.spd > 1.5 and sh.sinking < 0.3
-		rec["bow"].global_position = node.transform * Vector3(0, 0.5, -sh.length * 0.47)
+		node.transform = _ship_xform(sh, rec, dt)
+		wakes.steer(rec["wk"], node.transform, sh.length * 0.5, sh.spd, sh.sinking < 0.6)
+		rec["bow"].global_position = node.transform * Vector3(0, 0.6, -sh.length * 0.47)
 		rec["bow"].emitting = sh.spd > 8.0 and sh.sinking < 0.2
+		fx.aim_spray(rec["bow"], node.transform, sh.spd)
 		for s in rec["smoke"]:
 			s.emitting = sh.sinking < 0.6
 		if sh.fire > 0.05 and rec["fire"] == null:
-			var fp := Vector3(randf_range(-sh.beam * 0.2, sh.beam * 0.2), 9.0, randf_range(-sh.length * 0.2, sh.length * 0.2))
-			rec["fire"] = _smoke_emitter(node, fp, 30, m_fire, 3.0)
-			rec["fire"].lifetime = 1.5
-			rec["fire"].gravity = Vector3(0, 4, 0)
-			rec["fire_smoke"] = _smoke_emitter(node, fp + Vector3(0, 4, 0), 40, fx.m_smoke, 6.0)
-			rec["fire_smoke"].lifetime = 16.0
+			var fp := Vector3(randf_range(-sh.beam * 0.2, sh.beam * 0.2), float(node.get_meta("deck_y", 9.0)) + 0.5,
+				randf_range(-sh.length * 0.2, sh.length * 0.2))
+			rec["fire"] = fx.ship_fire(node, fp, clampf(sh.beam * 0.35, 3.0, 9.0))
 		if rec["fire"]:
-			rec["fire"].emitting = sh.fire > 0.05 and sh.sinking < 0.85
-			rec["fire_smoke"].emitting = sh.fire > 0.03
+			fx.set_fire(rec["fire"], sh.fire if sh.sinking < 0.85 else 0.0, sh.fire > 0.03)
 		_aim_turrets(sh, rec, dt)
 	_sync_planes(dt)
 	_sync_shells()
@@ -313,27 +283,48 @@ func _aim_turrets(sh: World.Ship, rec: Dictionary, dt: float) -> void:
 func _sync_sub(dt: float) -> void:
 	var s := world.sub
 	var p := U.to3(s.pos)
-	var wave := ocean.height(p.x, p.z) if s.depth < 6.0 else 0.0
-	var surf_mix := clampf(1.0 - s.depth / 6.0, 0.0, 1.0)
-	var y := -s.depth + wave * surf_mix * 0.7
 	var L: float = world.nat["sub"]["len"]
+	var B: float = world.nat["sub"]["beam"]
+	var surf_mix := clampf(1.0 - s.depth / 6.0, 0.0, 1.0)
+	var heave := 0.0
 	var pitch := 0.0
 	var roll := 0.0
 	if surf_mix > 0.0:
-		var f := U.dirv(s.hdg)
-		var bow := ocean.height(p.x + f.x * L * 0.4, p.z - f.y * L * 0.4)
-		var st := ocean.height(p.x - f.x * L * 0.4, p.z + f.y * L * 0.4)
+		var h := deg_to_rad(s.hdg)
+		var fwd := Vector3(sin(h), 0, -cos(h))
+		var stbd := Vector3(cos(h), 0, sin(h))
+		var bow := ocean.height(p.x + fwd.x * L * 0.4, p.z + fwd.z * L * 0.4)
+		var st := ocean.height(p.x - fwd.x * L * 0.4, p.z - fwd.z * L * 0.4)
+		var yp := ocean.height(p.x - stbd.x * B * 0.5, p.z - stbd.z * B * 0.5)
+		var ys := ocean.height(p.x + stbd.x * B * 0.5, p.z + stbd.z * B * 0.5)
+		heave = (bow + st + yp + ys) * 0.25 * 0.75 * surf_mix
 		pitch = atan2(bow - st, L * 0.8) * 0.6 * surf_mix
-		roll = sin(time * 0.7) * 0.025 * surf_mix
-	sub_node.transform = Transform3D(Basis.from_euler(Vector3(pitch, U.yaw(s.hdg), roll), EULER_ORDER_YXZ), Vector3(p.x, y, p.z))
-	sub_wake.global_position = sub_node.transform * Vector3(0, 0.3, L * 0.48)
-	sub_wake.emitting = s.depth < 3.0 and absf(s.spd) > 1.0
+		roll = (atan2(ys - yp, B) * 0.35 + sin(time * 0.7) * 0.02) * surf_mix
+	var k := 1.0 - exp(-dt / 1.1)
+	sub_motion["heave"] = lerpf(sub_motion["heave"], heave, k)
+	sub_motion["pitch"] = lerpf(sub_motion["pitch"], pitch, k)
+	sub_motion["roll"] = lerpf(sub_motion["roll"], roll, k * 0.8)
+	var y: float = -s.depth + sub_motion["heave"]
+	sub_node.transform = Transform3D(Basis.from_euler(Vector3(sub_motion["pitch"], U.yaw(s.hdg), sub_motion["roll"]),
+		EULER_ORDER_YXZ), Vector3(p.x, y, p.z))
+	var kn := absf(s.spd)
+	wakes.steer(sub_wk, sub_node.transform, L * 0.5, kn, s.depth < 3.0)
 	sub_bow.global_position = sub_node.transform * Vector3(0, 1.0, -L * 0.47)
-	sub_bow.emitting = s.depth < 2.0 and absf(s.spd) > 6.0
+	sub_bow.emitting = s.depth < 2.0 and kn > 6.0
+	fx.aim_spray(sub_bow, sub_node.transform, kn)
 	var head: Vector3 = sub_node.get_meta("scope_head")
 	var hp := sub_node.transform * head
+	var scope_on := s.scope_up and s.depth > 2.0 and s.depth <= World.PERI_MAX and kn > 2.0
+	var sxf := Transform3D(Basis(Vector3.UP, U.yaw(s.hdg)), Vector3(hp.x, 0.0, hp.z))
+	scope_wk["trail"].global_transform = sxf
+	scope_wk["trail"].emitting = scope_on
+	for a in scope_wk["arms"]:
+		a.global_transform = sxf
+		a.emitting = scope_on
+		a.initial_velocity_min = kn * U.KN * Wakes.KELVIN
+		a.initial_velocity_max = a.initial_velocity_min
 	feather.global_position = Vector3(hp.x, 0.2, hp.z)
-	feather.emitting = s.scope_up and s.depth > 2.0 and s.depth <= World.PERI_MAX and absf(s.spd) > 2.0
+	feather.emitting = scope_on
 	# Gun mounts follow the crew's aim.
 	var gy: Node3D = sub_node.get_meta("gun_yaw")
 	var gp: Node3D = sub_node.get_meta("gun_pitch")
@@ -370,8 +361,7 @@ func _sync_planes(dt: float) -> void:
 		for pr in node.get_meta("props"):
 			pr.rotation.z += dt * 40.0
 		if p.falling and rec["smoke"] == null:
-			rec["smoke"] = _smoke_emitter(node, Vector3.ZERO, 40, fx.m_smoke, 3.0)
-			rec["smoke"].lifetime = 6.0
+			rec["smoke"] = fx.trail_smoke(node)
 
 
 func _sync_shells() -> void:
@@ -414,17 +404,17 @@ func _sync_torps() -> void:
 		seen[tp.id] = true
 		var e: CPUParticles3D = torps.get(tp.id)
 		if e == null:
-			e = _wake_emitter(1.5, 60 if tp.wake else 12)
-			e.lifetime = 14.0 if tp.wake else 4.0
-			e.color_ramp = Fx.ramp(Color(1, 1, 1, 0.75 if tp.wake else 0.12), Color(1, 1, 1, 0))
+			# Steam torpedoes leave a bubbling white track; electric and oxygen ones barely a trace.
+			var life := 16.0 if tp.wake else 5.0
+			e = wakes.trail(2.2, life, int(clampf(life * tp.kn * U.KN / 1.4, 20.0, 300.0)), 0.45 if tp.wake else 0.1)
 			e.emitting = true
 			torps[tp.id] = e
-		e.global_position = Vector3(tp.pos.x, 0.15, -tp.pos.y)
+		e.global_transform = Transform3D(Basis(Vector3.UP, U.yaw(tp.hdg)), Vector3(tp.pos.x, 0.0, -tp.pos.y))
 	for id in torps.keys():
 		if not seen.has(id):
 			var e: CPUParticles3D = torps[id]
 			e.emitting = false
-			get_tree().create_timer(15.0).timeout.connect(e.queue_free)
+			get_tree().create_timer(17.0).timeout.connect(e.queue_free)
 			torps.erase(id)
 
 
@@ -437,20 +427,34 @@ func handle_event(ev: Dictionary) -> void:
 		"splash":
 			fx.splash(s3(ev["pos"]), ev["size"])
 		"boom":
-			fx.explosion(s3(ev["pos"]), ev["size"], ev.get("kind", ""))
+			var pos := s3(ev["pos"])
+			if ev.get("kind", "") == "torpedo" and ships.has(ev.get("ship", -1)):
+				# The hit is reported at the ship's centre; show it on the side facing the boat.
+				var node: Node3D = ships[ev["ship"]]["node"]
+				var side := node.global_transform.basis.x.normalized()
+				var to_sub := U.to3(world.sub.pos) - node.global_position
+				var beam: float = node.get_meta("beam", 20.0)
+				pos = node.global_position + side * signf(side.dot(to_sub)) * beam * 0.55
+				pos.y = 0.0
+			fx.explosion(pos, ev["size"], ev.get("kind", ""))
 		"dc":
 			fx.depth_charge(s3(ev["pos"]), ev["depth"])
 		"muzzle":
 			var pos := s3(ev["pos"])
+			var dir := Vector3.ZERO
 			if ev.has("ship") and ships.has(ev["ship"]):
 				var tl: Array = ships[ev["ship"]]["turrets"]
 				if not tl.is_empty():
 					var tn: Node3D = tl[randi() % tl.size()]
+					var cr: Node3D = tn.get_node_or_null("Cradle")
+					var bx: Transform3D = cr.global_transform if cr else tn.global_transform
 					pos = tn.global_transform * Vector3(0, 1.5, -6.0)
+					dir = -bx.basis.z
 			if ev.get("own", false):
 				var gp: Node3D = sub_node.get_meta("gun_pitch")
 				pos = gp.global_transform * Vector3(0, 0, -float(world.nat["gun"]["cal"]) * 0.045 - 0.5)
-			fx.muzzle(pos, ev["cal"])
+				dir = -gp.global_transform.basis.z
+			fx.muzzle(pos, ev["cal"], dir)
 		"strafe":
 			fx.strafe(s3(ev["from"]), s3(ev["to"]))
 		"spark":

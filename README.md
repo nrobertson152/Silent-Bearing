@@ -35,9 +35,37 @@ then either open `project.godot` in the editor and press Play, or run:
 godot --path /path/to/Silent-Bearing
 ```
 
-The project uses the Compatibility (OpenGL 3) renderer so it runs on older and
-integrated GPUs. If you have a modern GPU you can switch to Forward+ in
-Project Settings > Rendering.
+The game renders with Forward+ (Vulkan, or Direct3D 12 on Windows). On a GPU
+without Vulkan support, Godot falls back to the Compatibility (OpenGL 3)
+renderer automatically: everything still works, without the screen-space
+effects. Press `F9` in game to cycle the graphics quality (Low, Medium, High),
+or pass `-- --gfx low` on the command line for one run. The setting is saved.
+
+## Graphics
+
+- **Lighting:** soft sun and moon shadows over four cascades, screen-space
+  ambient occlusion and indirect light, reflections of ships, smoke and fire in
+  the water, distance haze that takes on the colour of the sky, a light
+  volumetric haze that flashes and fires light up, bloom, and AgX tone mapping.
+- **Ocean:** a long swell from a distant storm under a wind sea, on a grid
+  that is dense around the camera and coarse at the horizon. Breaking crests
+  whiten, thin crests glow with the sun behind them, and the sea state
+  changes with the mission: rough in the open ocean, nearly flat in Scapa Flow.
+- **Wakes:** every ship, your boat and every torpedo (steam ones most of all) draws into a
+  top-down foam map that the ocean reads, so wakes ride the waves: churned water
+  astern, the spreading 19.5-degree V of a Kelvin wake, bow waves and wash along
+  the hull, the periscope's feather, and foam slicks where shells, bombs and
+  depth charges went off. Ships pitch and roll on the swell (big ones barely).
+- **Ships:** procedural paint with the camouflage each target wore at the time
+  (Measure 12 on *Yorktown*, Measure 12 Modified splotches on *Wasp* and
+  *Juneau*, Measure 22 on *Indianapolis*, a splinter scheme on *Tirpitz*, Baltic
+  stripes on *Prinz Eugen*, fleet greys elsewhere), hull plating, portholes,
+  rust weeping from the deck edge and hawse pipes, waterline grime, and planked
+  teak, hinoki and pine decks or stained flight decks.
+- **Effects:** billowing lit smoke that drifts downwind, fireballs that cool
+  to soot, debris and embers, tall shell splashes with a crown and mist, domes
+  and plumes from depth charges, deck fires with flickering light and a column
+  of black smoke, muzzle blasts, and bow spray.
 
 ## How to play
 
@@ -113,6 +141,7 @@ she's badly hurt.
 | `Tab` | Plot table |
 | `M` | Sound on or off |
 | `F1` | Help |
+| `F9` | Graphics quality: low, medium, high |
 | `F11` | Fullscreen |
 | `Esc` | Leave a station or pause |
 
@@ -153,14 +182,14 @@ scripts/
   data.gd                  navies, boats, aircraft, targets and ship layouts
   util.gd                  bearing and ballistics helpers
   sim/world.gd             the simulation: no rendering, fully testable
-  build/                   procedural models: warships, your boat, aircraft, crew, islands
-  view/                    ocean, sky, effects and the 3D world
+  build/                   procedural models and paint: warships, your boat, aircraft, crew, islands
+  view/                    ocean, wake map, sky, effects, graphics settings and the 3D world
   interior/                walkable eight-compartment interior, its textures and props, the player
   deck/                    walkable deck, bridge and hatches; lookouts and gun crew
   ui/                      HUD, sights, live instruments, menus
   audio/sfx.gd             procedurally synthesised sound
   game.gd                  modes, cameras, input and the game loop
-shaders/                   ocean and sky
+shaders/                   ocean, sky, wake map, paint, decks, smoke and fire
 tests/run_tests.gd         headless simulation tests
 tools/                     screenshot tools, plus walk and deck tests
 ```
@@ -180,10 +209,18 @@ godot --headless --path . -s tools/deck_test.gd -- - us shokaku
 
 ### Rendering previews
 
+These render with Forward+. On a machine without a GPU, install Mesa's software
+Vulkan driver (`mesa-vulkan-drivers` on Ubuntu) and they run under `xvfb-run`,
+slowly. Add `--rendering-method gl_compatibility --rendering-driver opengl3` to
+check the OpenGL fallback instead. `--fixed-fps` makes the result independent of
+how fast the machine renders.
+
 ```bash
-xvfb-run godot --path . --rendering-driver opengl3 -s tools/model_preview.gd -- /tmp/out
-xvfb-run godot --path . --rendering-driver opengl3 -s tools/game_preview.gd -- /tmp/out de barham
-xvfb-run godot --path . --rendering-driver opengl3 -s tools/interior_preview.gd -- /tmp/out us shokaku
+xvfb-run godot --path . -s tools/model_preview.gd -- /tmp/out
+xvfb-run godot --path . --fixed-fps 10 -s tools/game_preview.gd -- /tmp/out de barham
+xvfb-run godot --path . -s tools/interior_preview.gd -- /tmp/out us shokaku
+xvfb-run godot --path . --fixed-fps 10 -s tools/sea_preview.gd -- /tmp/out us shokaku [day|dusk|night]
+xvfb-run godot --path . --fixed-fps 20 -s tools/fx_preview.gd -- /tmp/out torpedo
 ```
 
 ## License

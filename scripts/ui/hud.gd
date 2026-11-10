@@ -91,6 +91,8 @@ func build(g) -> void:
 	sv.add_child(station_title)
 	station_ins = Instruments.new()
 	station_ins.custom_minimum_size = Vector2(900, 600)
+	# Long bearing lines and range rings stop at the edge of the plot.
+	station_ins.clip_contents = true
 	sv.add_child(station_ins)
 	sv.add_child(Style.label("E or Esc to step away.   Orders still work: arrows, R / F, C, [ ].", 14, Style.MUTED))
 	station_panel.visible = false
@@ -175,22 +177,32 @@ func show_result() -> void:
 		"killed": ["CAPTAIN KILLED", "%s Without you the patrol is over." % w.death, Style.ALARM],
 		"drowned": ["LOST OVERBOARD", "%s The boat dived without you." % w.death, Style.ALARM],
 		"dry": ["OUT OF TORPEDOES", "Every tube is empty and %s is still afloat." % tg.short, Style.AMBER],
+		"disabled": ["OUT OF ACTION", "%s is burning and dead in the water. She won't fly aircraft again this war." % tg.name, Style.GOOD],
 	}
+	var modern: bool = w.nat.get("nuclear", false)
+	if modern:
+		heads["dry"] = ["OUT OF WEAPONS", "Nothing left to fire and %s is still afloat." % tg.short, Style.AMBER]
 	var h: Array = heads.get(w.result, ["PATROL OVER", "", Style.TEXT])
 	v.add_child(Style.label(Style.spaced(h[0]), 34, h[2]))
 	v.add_child(Style.label(h[1], 17, Style.TEXT, true))
 	var g := GridContainer.new()
 	g.columns = 4
 	g.add_theme_constant_override("h_separation", 30)
-	for kv in [["Patrol time", U.clock(w.t)], ["Torpedoes fired", str(w.fired)], ["Torpedo hits", str(w.hits)], ["Duds", str(w.duds)],
-			["Shell hits", str(w.gun_hits)], ["Escorts sunk", str(w.esc_sunk)], ["Aircraft shot down", str(w.planes_down)], ["Hull", "%d%%" % int(w.sub.hull)]]:
+	var stats := [["Patrol time", U.clock(w.t)], ["Torpedoes fired", str(w.fired)], ["Torpedo hits", str(w.hits)], ["Duds", str(w.duds)],
+		["Shell hits", str(w.gun_hits)], ["Escorts sunk", str(w.esc_sunk)], ["Aircraft shot down", str(w.planes_down)], ["Hull", "%d%%" % int(w.sub.hull)]]
+	if modern:
+		stats = [["Patrol time", U.clock(w.t)], ["Mk 48s fired", str(w.fired)], ["Mk 48 hits", str(w.hits)],
+			["Missiles fired", str(w.get("m_fired"))], ["Missile hits", str(w.get("m_hits"))], ["Shot down", str(w.get("m_down"))],
+			["Escorts sunk", str(w.esc_sunk)], ["Hull", "%d%%" % int(w.sub.hull)]]
+	for kv in stats:
 		var vb := VBoxContainer.new()
 		vb.add_child(Style.label(kv[0].to_upper(), 12, Style.MUTED))
 		vb.add_child(Style.label(kv[1], 20, Style.TEXT))
 		g.add_child(vb)
 	v.add_child(g)
 	v.add_child(HSeparator.new())
-	v.add_child(Style.label(Style.spaced("IN HISTORY" if w.spec["historical"] else "WHAT REALLY HAPPENED"), 13, Style.BRASS))
+	var head := "IN HISTORY" if w.spec["historical"] else ("THE SCENARIO" if modern else "WHAT REALLY HAPPENED")
+	v.add_child(Style.label(Style.spaced(head), 13, Style.BRASS))
 	v.add_child(Style.label(w.spec["credit"], 16, Style.TEXT))
 	var note := Style.label(w.spec["note"], 15, Style.TEXT, true)
 	note.custom_minimum_size = Vector2(700, 0)
@@ -225,7 +237,7 @@ func update(dt: float) -> void:
 	var dep := "SURFACED" if s.surfaced() else ("%d m (ordered %s)" % [int(s.depth), "SURFACE" if s.dep_ord <= 0.0 else "%d" % int(s.dep_ord)])
 	var power := "BAT %d%%" % int(s.bat)
 	if w.nat.get("nuclear", false):
-		power = "MK 48 x%d  DECOYS %d" % [s.spares + s.tubes.count(0), s.decoys]
+		power = w.weapon_line()
 	top_mid.text = "%s   %s   %s   %.1f kn   HDG %s   %s   HULL %d%%" % [World.TELEGRAPH[s.tel][0], World.RUDDER[s.rud_i][1], dep,
 		s.spd, U.p3(s.hdg), power, int(s.hull)]
 	var th := w.threat()

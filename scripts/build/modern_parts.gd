@@ -258,6 +258,7 @@ static func carrier(k: MeshKit, lay: Dictionary, L: float, B: float, deck_h: Cal
 	var dh: float = d["h"]
 	var dw: float = d["w"]
 	var ang := deg_to_rad(float(d.get("angled", 9.0)))
+	var ski := float(d.get("ski", 0.0))
 	var fb: float = lay["fb"]
 	# Hull sides up to the flight deck, following the hull's plan.
 	var poly := []
@@ -274,6 +275,11 @@ static func carrier(k: MeshKit, lay: Dictionary, L: float, B: float, deck_h: Cal
 	var outline := [
 		[0.0, -0.36, 0.30], [0.05, -0.50, 0.44], [0.16, -0.58, 0.56], [0.33, -0.62, 0.60],
 		[0.45, -0.93, 0.66], [0.62, -1.0, 0.74], [0.80, -1.0, 0.74], [0.93, -0.92, 0.62], [1.0, -0.80, 0.52]]
+	if ski > 0.0:
+		# A narrower bow that runs up into the ski-jump.
+		outline = [
+			[0.0, -0.24, 0.24], [0.05, -0.34, 0.36], [0.16, -0.47, 0.52], [0.33, -0.6, 0.6],
+			[0.45, -0.93, 0.66], [0.62, -1.0, 0.74], [0.80, -1.0, 0.74], [0.93, -0.92, 0.62], [1.0, -0.80, 0.52]]
 	var fd := []
 	for o in outline:
 		fd.append(Vector2(float(o[2]) * half, z_of(float(o[0]), L)))
@@ -283,6 +289,8 @@ static func carrier(k: MeshKit, lay: Dictionary, L: float, B: float, deck_h: Cal
 	# Prism needs a convex-ish shape around its centre; split port and
 	# starboard so the angled overhang triangulates cleanly.
 	k.prism("metal", fd, dh - 0.6, dh, "flight")
+	if ski > 0.0:
+		_ski_jump(k, outline, half, dh, ski, L)
 	# Sponson supports under the angled deck overhang.
 	for u in [0.5, 0.62, 0.74, 0.86]:
 		var xo: float = -half * 0.9
@@ -303,13 +311,23 @@ static func carrier(k: MeshKit, lay: Dictionary, L: float, B: float, deck_h: Cal
 		var off: Vector3 = Vector3(cos(ang), 0, -sin(ang)) * 14.0 * float(s)
 		k.box("white", mid + off, Vector3(0.4, 0.03, len), bas)
 	k.box("red", a0 + dir * len * 0.05 + Vector3(0, 0.012, 0), Vector3(30.0, 0.03, 0.6), bas)
-	# Catapult tracks: two on the bow, one in the waist along the angled deck.
-	for xc in [-half * 0.22, half * 0.22]:
-		k.box("black", Vector3(xc, y + 0.01, z_of(0.15, L)), Vector3(0.6, 0.03, L * 0.27))
-		k.box("metal", Vector3(xc, dh + 1.2, z_of(0.30, L) + 2.0), Vector3(9.0, 2.4, 0.4),
-			Basis(Vector3.RIGHT, deg_to_rad(-50.0)))
-	var wc := Vector3(-half * 0.55, y + 0.01, z_of(0.45, L))
-	k.box("black", wc, Vector3(0.6, 0.03, L * 0.28), bas)
+	if ski > 0.0:
+		# Three take-off spots, two forward and one in the waist, each with a
+		# blast deflector raised behind it and a line forward to the ramp.
+		for spot in [[-half * 0.16, 0.30], [half * 0.16, 0.30], [-half * 0.3, 0.55]]:
+			var xs: float = spot[0]
+			var zs := z_of(float(spot[1]), L)
+			var z_ramp := z_of(0.15, L)
+			k.box("white", Vector3(xs, y + 0.01, (zs + z_ramp) * 0.5), Vector3(0.35, 0.03, absf(zs - z_ramp)))
+			k.box("metal", Vector3(xs, dh + 1.2, zs + 5.0), Vector3(10.0, 2.6, 0.4), Basis(Vector3.RIGHT, deg_to_rad(-50.0)))
+	else:
+		# Catapult tracks: two on the bow, one in the waist along the angled deck.
+		for xc in [-half * 0.22, half * 0.22]:
+			k.box("black", Vector3(xc, y + 0.01, z_of(0.15, L)), Vector3(0.6, 0.03, L * 0.27))
+			k.box("metal", Vector3(xc, dh + 1.2, z_of(0.30, L) + 2.0), Vector3(9.0, 2.4, 0.4),
+				Basis(Vector3.RIGHT, deg_to_rad(-50.0)))
+		var wc := Vector3(-half * 0.55, y + 0.01, z_of(0.45, L))
+		k.box("black", wc, Vector3(0.6, 0.03, L * 0.28), bas)
 	# Yellow taxi lines and the deck number at the bow.
 	k.box("yellow", Vector3(half * 0.35, y + 0.01, z_of(0.5, L)), Vector3(0.3, 0.03, L * 0.5))
 	if lay.has("hull_no"):
@@ -317,7 +335,7 @@ static func carrier(k: MeshKit, lay: Dictionary, L: float, B: float, deck_h: Cal
 		var hh := 9.0
 		for i in num.length():
 			var xx := (float(i) - (num.length() - 1) * 0.5) * hh * 0.8
-			_deck_digit(k, num[i], Vector3(xx, y + 0.02, z_of(0.05, L) + hh * 0.6), hh * 0.5, hh)
+			_deck_digit(k, num[i], Vector3(xx, y + 0.02, z_of(0.19 if ski > 0.0 else 0.05, L) + hh * 0.6), hh * 0.5, hh)
 	# Deck-edge lifts (dark plates) on the starboard side and port aft.
 	for u in [0.42, 0.78]:
 		k.box("black", Vector3(half * 0.62, y, z_of(u, L)), Vector3(16.0, 0.03, 18.0))
@@ -353,6 +371,39 @@ static func carrier(k: MeshKit, lay: Dictionary, L: float, B: float, deck_h: Cal
 		var t := Transform3D(Basis(Vector3.UP, deg_to_rad(-120.0)), Vector3(x, dh + 0.9, z_of(u, L)))
 		PlaneBuilder.add_simple(k, t, "jet", 15.0, 21.0, "plane")
 	return tops
+
+
+## The ski-jump: the forward flight deck curving up to `deg` degrees at the
+## bow, so jets leave the deck climbing.
+static func _ski_jump(k: MeshKit, outline: Array, half: float, dh: float, deg: float, L: float) -> void:
+	var u_end := 0.15
+	var rise := u_end * L * tan(deg_to_rad(deg)) * 0.5
+	var steps := 10
+	for i in steps:
+		var ua := u_end * float(i) / steps
+		var ub := u_end * float(i + 1) / steps
+		var ha := dh + rise * pow(1.0 - ua / u_end, 2.0)
+		var hb := dh + rise * pow(1.0 - ub / u_end, 2.0)
+		var wa := _deck_width(outline, ua, half)
+		var wb := _deck_width(outline, ub, half)
+		var za := z_of(ua, L)
+		var zb := z_of(ub, L)
+		k.hexa("hull", [Vector3(wa.x, dh - 0.6, za), Vector3(wa.y, dh - 0.6, za), Vector3(wb.y, dh - 0.6, zb), Vector3(wb.x, dh - 0.6, zb),
+			Vector3(wa.x, ha, za), Vector3(wa.y, ha, za), Vector3(wb.y, hb, zb), Vector3(wb.x, hb, zb)])
+		k.quad("flight", Vector3(wa.x, ha + 0.03, za), Vector3(wa.y, ha + 0.03, za), Vector3(wb.y, hb + 0.03, zb),
+			Vector3(wb.x, hb + 0.03, zb), Vector3(0.0, dh - 10.0, (za + zb) * 0.5))
+
+
+## Port and starboard edges of the flight deck at `u`, in metres.
+static func _deck_width(outline: Array, u: float, half: float) -> Vector2:
+	for i in outline.size() - 1:
+		var a: Array = outline[i]
+		var b: Array = outline[i + 1]
+		if u <= float(b[0]):
+			var f := (u - float(a[0])) / maxf(float(b[0]) - float(a[0]), 1e-4)
+			return Vector2(lerpf(float(a[1]), float(b[1]), f), lerpf(float(a[2]), float(b[2]), f)) * half
+	var last: Array = outline[-1]
+	return Vector2(float(last[1]), float(last[2])) * half
 
 
 ## A painted deck number, seven-segment style, read from aft.

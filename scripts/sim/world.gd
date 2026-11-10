@@ -745,6 +745,20 @@ func launch_decoy() -> void:
 	pass
 
 
+## Near-future boats only: pick the weapon, and the missile salvo size.
+func cycle_weapon() -> void:
+	pass
+
+
+## Weapons left, for the top bar (the near-future boats override this).
+func weapon_line() -> String:
+	return "TORPEDOES %d" % (sub.spares + sub.tubes.count(0.0))
+
+
+func salvo_step(_d: int) -> void:
+	pass
+
+
 func lock_sonar() -> void:
 	report("Locking needs the periscope or the binoculars on deck.", "warn")
 

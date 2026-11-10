@@ -29,6 +29,11 @@ func _init() -> void:
 		# The near-future boats: one control room, no deck watch.
 		steps = ["menu_modern", "targets", "brief", "start", "interior", "interior_fwd", "sonar", "tdc", "chart",
 			"periscope", "periscope_zoom", "external", "under", "result"]
+		if GameData.nations()[nid].has("missiles"):
+			# A salvo: the launch, their defences at work, and the plot.
+			steps.insert(steps.find("external"), "salvo")
+			steps.insert(steps.find("external"), "defence")
+			steps.insert(steps.find("external"), "missile_chart")
 
 
 func _snap(name: String) -> void:
@@ -164,6 +169,64 @@ func _process(_dt: float) -> bool:
 		"zoom_snap":
 			_snap("10_periscope_high")
 			w.sub.zoom = false
+		"salvo":
+			var tg := w.target
+			tg.pos = w.sub.pos + U.dirv(w.sub.hdg + 20.0) * 9000.0
+			tg.hdg = U.wrap360(w.sub.hdg + 110.0)
+			for e in w.ships:
+				if e.kind == "escort":
+					e.pos = World._station(tg, e.off)
+					e.hdg = tg.hdg
+			w.lock_ship(tg)
+			w.lock_obs = 15.0
+			w.sub.spd = 5.0
+			w.sub.zoom = false
+			w.set("weapon", "tomahawk")
+			w.set("salvo", 8)
+			w.fire(3)
+			w.tc = 1
+			game.set_mode("external")
+			game.ext_dist = 150.0
+			game.ext_yaw = 2.6
+			game.ext_pitch = 0.1
+			wait = 48
+			steps.pop_front()
+			steps.push_front("salvo_snap")
+			return false
+		"salvo_snap":
+			_snap("17_launch")
+			game.open_overlay("tdc")
+			wait = 3
+			steps.pop_front()
+			steps.push_front("salvo_fc_snap")
+			return false
+		"salvo_fc_snap":
+			_snap("17_fire_control")
+			game.close_overlay()
+		"defence":
+			w.tc = 4
+			game.set_mode("periscope")
+			w.sub.zoom = false
+			w.sub.scope_rel = U.adiff(U.brg(w.sub.pos, w.target.pos), w.sub.hdg)
+			wait = 70
+			steps.pop_front()
+			steps.push_front("defence_snap")
+			return false
+		"defence_snap":
+			w.tc = 1
+			w.sub.scope_rel = U.adiff(U.brg(w.sub.pos, w.target.pos), w.sub.hdg)
+			_snap("18_defence")
+		"missile_chart":
+			game.chart_r = 12000.0
+			game.open_overlay("chart")
+			wait = 4
+			steps.pop_front()
+			steps.push_front("missile_chart_snap")
+			return false
+		"missile_chart_snap":
+			_snap("19_plot_missiles")
+			game.close_overlay()
+			w.tc = 1
 		"surface":
 			w.sub.depth = 0.0
 			w.sub.flood = 0.0

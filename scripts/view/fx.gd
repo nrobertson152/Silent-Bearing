@@ -367,6 +367,108 @@ func _fly(dt: float) -> void:
 	flights = keep
 
 
+## A missile or surface-to-air missile airframe with its motor flame and a
+## smoke trail. Returns {"node", "meshes", "flame", "smoke"}; the node faces -Z.
+func missile_body(kind: String) -> Dictionary:
+	var n := Node3D.new()
+	add_child(n)
+	var sam := kind == "sam"
+	var length := 6.6 if sam else (6.2 if kind == "tomahawk" else 4.6)
+	var r := 0.23 if sam else (0.27 if kind == "tomahawk" else 0.17)
+	var mat := MeshKit.mat(Color(0.86, 0.86, 0.83) if sam else Color(0.42, 0.44, 0.45), 0.55, 0.2)
+	var meshes := []
+	var body := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = r * 0.3
+	cm.bottom_radius = r
+	cm.height = length
+	cm.radial_segments = 10
+	body.mesh = cm
+	body.rotation.x = -PI * 0.5
+	body.material_override = mat
+	n.add_child(body)
+	meshes.append(body)
+	# Wings (cruise missiles) or fins (all), as thin plates.
+	var plates := [[Vector3(length * 0.5 if not sam else 1.0, 0.05, 0.5), Vector3(0, 0, 0.3 if not sam else 1.6)],
+		[Vector3(0.05, 1.0, 0.45), Vector3(0, 0, length * 0.44)], [Vector3(1.0, 0.05, 0.45), Vector3(0, 0, length * 0.44)]]
+	for pl in plates:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = pl[0]
+		mi.mesh = bm
+		mi.position = pl[1]
+		mi.material_override = mat
+		n.add_child(mi)
+		meshes.append(mi)
+	var flame := CPUParticles3D.new()
+	flame.mesh = quad
+	flame.material_override = m_fire
+	flame.amount = 18
+	flame.lifetime = 0.25
+	flame.local_coords = false
+	flame.direction = Vector3(0, 0, 1)
+	flame.spread = 6.0
+	flame.initial_velocity_min = 14.0
+	flame.initial_velocity_max = 22.0
+	flame.gravity = Vector3.ZERO
+	flame.scale_amount_min = 0.9 if sam else 1.3
+	flame.scale_amount_max = 1.5 if sam else 2.2
+	flame.color_ramp = ramp(Color(1, 1, 1, 1), Color(0.4, 1, 1, 0))
+	flame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	flame.position = Vector3(0, 0, length * 0.5 + 0.3)
+	n.add_child(flame)
+	# Enough puffs, close enough together, to read as a trail at their speed.
+	var smoke := funnel_smoke(n, Vector3(0, 0, length * 0.5 + 0.8), m_steam, 1.8 if sam else 1.5)
+	smoke.amount = 200 if sam else 70
+	smoke.lifetime = 2.6 if sam else 8.0
+	smoke.direction = Vector3(0, 0, 1)
+	smoke.spread = 12.0
+	smoke.initial_velocity_min = 0.5
+	smoke.initial_velocity_max = 2.0
+	smoke.gravity = wind * 0.7 + Vector3(0, 0.15, 0)
+	smoke.color_ramp = stops([[0.0, Color(1, 1, 1, 0.0)], [0.04, Color(1.2, 1.2, 1.2, 0.85)], [0.5, Color(1.2, 1.2, 1.2, 0.45)], [1.0, Color(1.3, 1.3, 1.3, 0)]])
+	return {"node": n, "meshes": meshes, "flame": flame, "smoke": smoke}
+
+
+## A missile gone (hit, shot down or into the sea): the airframe vanishes and
+## its trail is left to drift away.
+func drop_missile(rec: Dictionary) -> void:
+	for mi in rec["meshes"]:
+		(mi as Node3D).visible = false
+	(rec["flame"] as CPUParticles3D).emitting = false
+	(rec["smoke"] as CPUParticles3D).emitting = false
+	var n: Node3D = rec["node"]
+	get_tree().create_timer(9.0).timeout.connect(n.queue_free)
+
+
+## A missile bursting out of the sea from a submerged boat.
+func broach(pos: Vector3) -> void:
+	splash(Vector3(pos.x, 0.0, pos.z), 2.4)
+	particles(Vector3(pos.x, 1.0, pos.z), m_steam, 22, 7.0, Vector2(2.0, 8.0), 35.0, Vector2(3.0, 6.0), wind * 1.0 + Vector3(0, 0.8, 0),
+		stops([[0.0, Color(1, 1, 1, 0.0)], [0.05, Color(1.2, 1.2, 1.2, 0.85)], [1.0, Color(1.3, 1.3, 1.3, 0)]]),
+		true, Vector3.UP, Vector3(2.0, 0.5, 2.0), Vector3(0.5, 1.4, 2.6), Vector2(0.6, 1.4))
+	_light(pos + Vector3(0, 6, 0), Color(1.0, 0.75, 0.45), 90.0, 5.0, 0.5)
+
+
+## A surface-to-air missile leaving its cell: a flash and a gout of smoke.
+func cell_launch(pos: Vector3) -> void:
+	particles(pos, m_steam, 16, 5.0, Vector2(2.0, 7.0), 30.0, Vector2(3.0, 6.0), wind * 1.2 + Vector3(0, 0.6, 0),
+		stops([[0.0, Color(1, 1, 1, 0.0)], [0.05, Color(1.2, 1.2, 1.2, 0.9)], [1.0, Color(1.3, 1.3, 1.3, 0)]]),
+		true, Vector3.UP, Vector3(1.5, 0.5, 1.5), Vector3(0.5, 1.4, 2.6), Vector2(0.6, 1.4))
+	_light(pos + Vector3(0, 4, 0), Color(1.0, 0.75, 0.45), 70.0, 6.0, 0.35)
+
+
+## A burst from a close-in gun: a stream of glowing rounds toward a missile.
+func tracers(from: Vector3, to: Vector3) -> void:
+	var d := to - from
+	var dist := d.length()
+	if dist < 5.0:
+		return
+	particles(from, m_ember, 14, clampf(dist / 1050.0, 0.1, 3.0), Vector2(1000.0, 1100.0), 0.6, Vector2(0.7, 1.0), Vector3.ZERO,
+		ramp(Color(1.0, 0.85, 0.5, 1), Color(1.0, 0.6, 0.2, 0.6)), true, d / dist, Vector3.ZERO, Vector3(1, 1, 1), Vector2(0.0, 0.0))
+	_light(from, Color(1.0, 0.8, 0.5), 25.0, 3.0, 0.1)
+
+
 ## A homing torpedo dropped into the sea, or a decoy fired from the hull.
 func drop_splash(pos: Vector3) -> void:
 	splash(Vector3(pos.x, 0.0, pos.z), 1.4)

@@ -22,6 +22,17 @@ const LW_RANGE := 9000.0
 const LW_SEEKER := 1500.0
 ## Rocket-delivered torpedo reach and flight time.
 const ROCKET_RANGE := 18000.0
+## Missile launches: deepest and fastest the boat can be, seconds between
+## missiles in a salvo, seconds of booster climb, and salvo sizes to pick.
+const MISSILE_DEPTH := 45.0
+const MISSILE_KN := 10.0
+const LAUNCH_EVERY := 3.0
+const BOOST_T := 6.0
+const SALVOS := [1, 2, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 154]
+## Offboard contact reports (satellites, patrol aircraft) come this often.
+const LINK_EVERY := 150.0
+## Escorts only leave the screen to hunt a datum closer than this.
+const HUNT_RADIUS := 35000.0
 
 
 ## A homing torpedo: your Mk 48s, and the enemy's lightweight torpedoes.
@@ -52,8 +63,64 @@ class Decoy:
 	var life := DECOY_LIFE
 
 
+## A missile in the air: your Harpoons and Tomahawks, and their
+## surface-to-air missiles going after them.
+class Missile:
+	var id := 0
+	var kind := "tomahawk"     # harpoon, tomahawk, sam
+	var unit := 0              # number for reports
+	var salvo := 0
+	var owner := -1            # -1 your boat; else the ship that fired it
+	var pos := Vector2.ZERO
+	var alt := 0.0
+	var hdg := 0.0
+	var spd := 0.0             # m/s
+	var top := 240.0           # full speed, m/s
+	var state := "boost"       # yours: boost, dive, cruise, seek, home, decoyed; theirs: fly
+	var cruise_alt := 12.0
+	var way := Vector2.ZERO    # dogleg turn point, so a salvo arrives together
+	var has_way := false
+	var aim := Vector2.ZERO    # where its target should be when it gets there
+	var aim_id := -1           # the ship it was fired at, or is homing on
+	var arrive := 0.0          # planned time on target
+	var seeker := 20000.0
+	var cone := 40.0
+	var flown := 0.0
+	var reach := 100000.0
+	var kg := 450.0
+	var link := false          # takes new aim points over the link
+	var origin := Vector2.ZERO
+	var t0 := 0.0
+	var seen := false          # their radars have it
+	var engaged := 0           # their missiles in the air after it
+	var chaffed := false
+	var fake := Vector2.ZERO   # the chaff cloud that pulled it off
+	var next_aim := 0.0
+	var dead := false
+	var tgt := -1              # theirs: the missile it is after
+	var layer := 0             # theirs: which of the ship's layers fired it
+	var pk := 0.5              # theirs: chance it kills
+	var trail: Array = []
+
+
 var etorps: Array[Homer] = []
 var decoys: Array[Decoy] = []
+var missiles: Array[Missile] = []
+var weapon := "mk48"             # mk48, harpoon, tomahawk
+var salvo := 4
+var harpoons := 0
+var vls := 0                     # Tomahawks left in the launch cells
+var launch_queue: Array = []     # missiles of a salvo still to leave: {"kind", "at", "aim", "aim_id", "arrive", "side", "salvo"}
+var salvos := {}                 # salvo number -> tally for the report at the end
+var oth := {}                    # ship id -> {"pos", "vel", "t", "err"}: offboard reports over the link
+var link_t := -999.0             # when we last took the link
+var m_units := 0
+var m_fired := 0
+var m_hits := 0
+var m_down := 0                  # shot down
+var adef := {}                   # ship id -> {"stock": [], "busy": [], "next": [], "fx": 0.0}
+var air_alert := -999.0          # when their radars last saw a missile
+var _mindex := {}                # missile id -> Missile, rebuilt every tick
 var rockets: Array = []          # {"from", "to", "t", "dur", "id"} rocket-thrown torpedoes in flight
 var datum := Vector2.ZERO        # where the enemy thinks you are
 var datum_t := -999.0
@@ -80,11 +147,21 @@ func _init(nation: Dictionary, target_spec: Dictionary, is_demo := false) -> voi
 	sub.scope_up = false
 	sub.tel = 3
 	sub.spd = 0.3 * float(nat["sub_kn"])
+	var ms: Dictionary = nat.get("missiles", {})
+	harpoons = int(ms.get("harpoon", 0))
+	vls = int(ms.get("tomahawk", 0))
+	if spec.has("start"):
+		# A missile strike from beyond sonar range: Tomahawks up first.
+		weapon = "tomahawk" if vls > 0 else "mk48"
+		salvo = 64 if vls >= 64 else 4
 	_set_depths()
 
 
 func _opening() -> void:
 	report("Conn: on station at 60 metres, ahead one-third. Hunting %s and her group." % target.name, "good")
+	if spec.has("start"):
+		report("Radio: %s's group is about %d km off, too far to hear. Come up, raise the mast and take the link for her position." % [
+			target.short, int(sub.pos.distance_to(target.pos) / 5000.0) * 5], "info")
 	report("Sonar: towed array streamed. Listening.")
 	report("Bathythermograph: thermal layer near %d metres. Below it, their hull sonars hear us half as well." % int(layer_depth))
 
@@ -109,9 +186,15 @@ func _spawn() -> void:
 	tg.zig = spec["zig"]
 	tg.cruise = tg.max_kn * 0.7
 	tg.hull = _make_hull(tg, float(spec["hp"]))
-	var side := 1.0 if randf() < 0.5 else -1.0
-	tg.pos = Vector2(-side * randf_range(20000, 25000), randf_range(14000, 19000))
-	tg.hdg = U.wrap360((90.0 if side > 0 else 270.0) + randf_range(-20.0, 20.0))
+	var start: Array = spec.get("start", [])
+	if start.size() == 2:
+		# Far out, more or less ahead, steaming toward us.
+		tg.pos = U.dirv(sub.hdg + randf_range(-35.0, 35.0)) * randf_range(float(start[0]), float(start[1]))
+		tg.hdg = U.wrap360(U.brg(tg.pos, sub.pos) + randf_range(-25.0, 25.0))
+	else:
+		var side := 1.0 if randf() < 0.5 else -1.0
+		tg.pos = Vector2(-side * randf_range(20000, 25000), randf_range(14000, 19000))
+		tg.hdg = U.wrap360((90.0 if side > 0 else 270.0) + randf_range(-20.0, 20.0))
 	tg.base_hdg = tg.hdg
 	tg.leg = tg.hdg
 	tg.spd = tg.cruise
@@ -151,6 +234,17 @@ func _spawn() -> void:
 	for key in spec.get("air", []):
 		_spawn_helo(key, pads[planes.size() % pads.size()])
 	next_plane = 1e9
+	# Missile magazines for their air defence.
+	for sh in ships:
+		var ad := GameData.air_defence(sh.layout)
+		if ad.is_empty():
+			continue
+		var st := {"stock": [], "busy": [], "next": [], "fx": 0.0}
+		for L in ad["sams"]:
+			st["stock"].append(int(L["n"]))
+			st["busy"].append(0)
+			st["next"].append(0.0)
+		adef[sh.id] = st
 
 
 func _spawn_helo(key: String, pad: Ship) -> void:
@@ -354,6 +448,9 @@ func solution():
 func fire(n := 1, view_brg := -1.0) -> void:
 	if result != "" or demo:
 		return
+	if weapon != "mk48":
+		fire_missiles(weapon, 1 if n <= 1 else salvo)
+		return
 	var s := sub
 	if s.depth > fire_max():
 		report("Too deep to fire. Come above %d metres." % int(fire_max()), "warn")
@@ -457,6 +554,7 @@ func _update_torps(dt: float) -> void:
 	_update_mk48(dt)
 	_update_rockets(dt)
 	_update_enemy_torps(dt)
+	_update_missiles(dt)
 	var keep: Array[Decoy] = []
 	for d in decoys:
 		d.life -= dt
@@ -593,8 +691,9 @@ func _new_datum(p: Vector2, err: float, by: Ship) -> void:
 	datum_t = t
 	alarm_t = t
 	alert = true
+	# Escorts close enough go hunting; the rest keep the screen round her.
 	for e in ships:
-		if e.kind != "target" and e.alive() and e.state == "screen":
+		if e.kind != "target" and e.alive() and e.state == "screen" and e.pos.distance_to(datum) < HUNT_RADIUS:
 			e.state = "hunt"
 			e.search_until = t + 600.0
 
@@ -618,6 +717,648 @@ func _mk48_hit(tp: Homer, sh: Ship) -> void:
 	elif sh.struct <= 0.0 and not blew and sh.kind == "target" and result == "":
 		_ship_sunk(sh, "torpedo")
 	_torpedo_alarm(tp)
+
+
+# --------------------------------------------------------------- missiles
+## Weapons Q steps through.
+func weapons() -> Array:
+	var out := ["mk48"]
+	if harpoons > 0:
+		out.append("harpoon")
+	if vls > 0:
+		out.append("tomahawk")
+	return out
+
+
+func weapon_name(w := "") -> String:
+	var k := weapon if w == "" else w
+	return "Mk 48" if k == "mk48" else String(GameData.MISSILES[k]["name"])
+
+
+## Rounds left of a weapon.
+func stock(w := "") -> int:
+	match weapon if w == "" else w:
+		"harpoon":
+			return harpoons
+		"tomahawk":
+			return vls
+	return sub.spares + sub.tubes.count(0.0)
+
+
+func weapon_line() -> String:
+	var out := []
+	for k in weapons():
+		var short: String = {"mk48": "MK 48", "harpoon": "HARPOON", "tomahawk": "TLAM"}[k]
+		var txt := "%s x%d" % [short, stock(k)]
+		out.append("[%s]" % txt if k == weapon else txt)
+	out.append("DECOYS %d" % sub.decoys)
+	return "  ".join(out)
+
+
+func cycle_weapon() -> void:
+	var ws := weapons()
+	weapon = ws[(ws.find(weapon) + 1) % ws.size()]
+	if weapon == "mk48":
+		report("Weapons: Mk 48s. Space fires one, X two.")
+	else:
+		salvo = clampi(salvo, 1, maxi(stock(), 1))
+		report("Weapons: %ss, %d left. X fires a salvo of %d; [ and ] change it." % [weapon_name(), stock(), salvo])
+
+
+func salvo_step(d: int) -> void:
+	if weapon == "mk48":
+		report("Weapons: press Q to pick a missile first.")
+		return
+	var i := 0
+	while i < SALVOS.size() - 1 and int(SALVOS[i]) < salvo:
+		i += 1
+	i = clampi(i + d, 0, SALVOS.size() - 1)
+	salvo = mini(int(SALVOS[i]), maxi(stock(), 1))
+	report("Weapons: salvo of %d %s%s." % [salvo, weapon_name(), "s" if salvo > 1 else ""])
+
+
+## Is the boat taking the satellite link (mast up at periscope depth)?
+func linked() -> bool:
+	var s := sub
+	return s.surfaced() or (s.scope_up and s.depth <= PERI_MAX and s.sys["periscope"] > 25.0)
+
+
+## Offboard contact reports for the whole group, every few minutes, if
+## we're up to take them.
+func _link() -> void:
+	if not linked() or (link_t > -900.0 and t - link_t < LINK_EVERY):
+		return
+	link_t = t
+	var n := 0
+	for sh in ships:
+		if not sh.alive():
+			continue
+		var vel := U.dirv(sh.hdg) * sh.spd * U.KN
+		var age := randf_range(20.0, 90.0)
+		var err := 600.0 if sh.kind == "target" else 1000.0
+		oth[sh.id] = {"pos": sh.pos - vel * age + Vector2(U.gauss(), U.gauss()) * err * 0.5, "vel": vel, "t": t - age, "err": err}
+		n += 1
+	var tg := target
+	if not tg.alive():
+		return
+	var est := aim_estimate(tg)
+	var p: Vector2 = est[0]
+	report("Radio: link update. %s bearing %s, %.0f km, course %s, %d knots, %d ships with her." % [tg.name,
+		U.p3(U.brg(sub.pos, p)), sub.pos.distance_to(p) / 1000.0, U.p3(tg.hdg), int(round(tg.spd)), n - 1], "good")
+	if lock == null or not lock.alive():
+		lock = tg
+		lock_obs = 0.0
+		lock_err = Vector2(U.gauss(), U.gauss())
+		lock_rng_err = U.gauss()
+
+
+## Best guess of where a ship is now: our own fire control solution if we
+## are tracking her, or the last link report run forward, whichever is
+## tighter. [position, velocity, error radius], or [] if we know nothing.
+func aim_estimate(sh: Ship) -> Array:
+	var best: Array = []
+	if sh == null:
+		return best
+	if lock == sh:
+		best = fire_control_estimate()
+	if oth.has(sh.id):
+		var o: Dictionary = oth[sh.id]
+		var age := t - float(o["t"])
+		var err := float(o["err"]) + age * sh.max_kn * U.KN * 0.15
+		if best.is_empty() or err < float(best[2]):
+			best = [(o["pos"] as Vector2) + (o["vel"] as Vector2) * age, o["vel"], err]
+	return best
+
+
+## Order a salvo. Missiles leave one every few seconds and fly doglegs so
+## they all arrive together, which is what swamps a ship's defences.
+func fire_missiles(kind: String, n: int) -> void:
+	if result != "" or demo:
+		return
+	var s := sub
+	var info: Dictionary = GameData.MISSILES[kind]
+	var nm := String(info["name"])
+	if s.depth > MISSILE_DEPTH:
+		report("Too deep to launch missiles. Come above %d metres." % int(MISSILE_DEPTH), "warn")
+		return
+	if absf(s.spd) > MISSILE_KN:
+		report("Too fast to launch. Slow below %d knots." % int(MISSILE_KN), "warn")
+		return
+	if not launch_queue.is_empty():
+		report("Weapons: still launching, %d to go." % launch_queue.size(), "warn")
+		return
+	if s.hull <= 25.0 or (kind == "harpoon" and s.sys["tubes"] <= 25.0):
+		report("Weapons: launch systems damaged. We can't fire.", "warn")
+		return
+	var tg := lock
+	var est: Array = aim_estimate(tg) if tg != null and tg.alive() else []
+	if est.is_empty():
+		report("Fire control: no target for the missiles. Track a ship (L) or take the link.", "warn")
+		return
+	var left := stock(kind)
+	if kind == "harpoon":
+		left = mini(left, s.tubes.count(0.0))
+	n = mini(n, left)
+	if n <= 0:
+		report("Weapons: no %s ready." % nm if kind == "harpoon" and harpoons > 0 else "Weapons: no %ss left." % nm, "warn")
+		return
+	var speed := float(info["kn"]) * U.KN
+	var p: Vector2 = est[0]
+	var v: Vector2 = est[1]
+	var last := (n - 1) * LAUNCH_EVERY
+	var tof := 0.0
+	for k in 3:
+		tof = s.pos.distance_to(p + v * (last + tof)) / speed + 20.0
+	var arrive := t + last + tof
+	var aim := p + v * (arrive - t)
+	var d := s.pos.distance_to(aim)
+	if d > float(info["range"]) * 0.95:
+		report("Fire control: %s is beyond the %s's reach." % [tg.short, nm], "warn")
+		return
+	if d < 5000.0:
+		report("Fire control: she's too close for missiles. Use the Mk 48s.", "warn")
+		return
+	if kind == "harpoon":
+		harpoons -= n
+		var fired_tubes := 0
+		for i in s.tubes.size():
+			if fired_tubes < n and s.tubes[i] == 0.0:
+				s.tubes[i] = RELOAD + i * LAUNCH_EVERY
+				fired_tubes += 1
+	else:
+		vls -= n
+	var sid := salvos.size() + 1
+	salvos[sid] = {"kind": kind, "n": n, "left": n, "down": 0, "hits": {}, "lost": 0}
+	for i in n:
+		launch_queue.append({"kind": kind, "at": t + i * LAUNCH_EVERY, "aim": aim, "aim_id": tg.id, "arrive": arrive,
+			"side": 1.0 if i % 2 == 0 else -1.0, "salvo": sid})
+	report("Weapons: salvo of %d %s%s at %s, %.0f km. Time on target %s." % [n, nm, "s" if n > 1 else "", tg.short,
+		d / 1000.0, U.clock(arrive - t).substr(3)], "good")
+	if float(est[2]) > float(info["seeker"]) * 0.6:
+		report("Fire control: her position is only good to %.0f km. The seekers may not find her." % (float(est[2]) / 1000.0), "warn")
+
+
+func _launch_one(q: Dictionary) -> void:
+	var s := sub
+	var kind: String = q["kind"]
+	var info: Dictionary = GameData.MISSILES[kind]
+	var m := Missile.new()
+	m.id = _new_id()
+	m_units += 1
+	m.unit = m_units
+	m.salvo = int(q["salvo"])
+	m.kind = kind
+	var L: float = nat["sub"]["len"]
+	# Tubes in the bow; the cells just abaft the bow (Virginia) or along the hull (Ohio).
+	var along := 0.45 if kind == "harpoon" else (0.32 if L < 140.0 else randf_range(-0.05, 0.2))
+	m.pos = s.pos + U.dirv(s.hdg) * L * along
+	m.origin = m.pos
+	m.hdg = U.brg(m.pos, q["aim"])
+	m.top = float(info["kn"]) * U.KN
+	m.spd = 25.0
+	m.cruise_alt = info["cruise"]
+	m.aim = q["aim"]
+	m.aim_id = int(q["aim_id"])
+	m.arrive = q["arrive"]
+	m.seeker = info["seeker"]
+	m.cone = info["cone"]
+	m.reach = info["range"]
+	m.kg = info["kg"]
+	m.link = info["link"]
+	m.t0 = t
+	# A dogleg out to one side, as long as the time left needs.
+	var d := m.pos.distance_to(m.aim)
+	var need := m.top * maxf(float(q["arrive"]) - t - BOOST_T - 12.0, 0.0)
+	if need > d * 1.02 + 800.0:
+		var h := sqrt(maxf(need * need - d * d, 0.0)) * 0.5
+		m.way = (m.pos + m.aim) * 0.5 + U.dirv(U.brg(m.pos, m.aim) + 90.0 * float(q["side"])) * h
+		m.has_way = true
+	m.trail = [m.pos]
+	missiles.append(m)
+	m_fired += 1
+	emit({"type": "mlaunch", "pos": Vector3(m.pos.x, 0.0, m.pos.y), "kind": kind})
+	sound("launch", 0.6)
+
+
+func _update_missiles(dt: float) -> void:
+	while not launch_queue.is_empty() and float(launch_queue[0]["at"]) <= t:
+		var s := sub
+		if s.depth > MISSILE_DEPTH + 5.0 or absf(s.spd) > MISSILE_KN + 3.0 or s.hull <= 25.0:
+			var held := launch_queue.size()
+			for q in launch_queue:
+				if q["kind"] == "harpoon":
+					harpoons += 1
+				else:
+					vls += 1
+				salvos[int(q["salvo"])]["n"] = int(salvos[int(q["salvo"])]["n"]) - 1
+				salvos[int(q["salvo"])]["left"] = int(salvos[int(q["salvo"])]["left"]) - 1
+			launch_queue.clear()
+			report("Weapons: launch aborted, %d missiles held in the cells." % held, "warn")
+			break
+		var q: Dictionary = launch_queue.pop_front()
+		_launch_one(q)
+		if launch_queue.is_empty():
+			var sv: Dictionary = salvos[int(q["salvo"])]
+			report("Weapons: %d %s%s away." % [int(sv["n"]), weapon_name(q["kind"]), "s" if int(sv["n"]) > 1 else ""], "good")
+	_link()
+	_mindex.clear()
+	for m in missiles:
+		if not m.dead:
+			_mindex[m.id] = m
+	var keep: Array[Missile] = []
+	for m in missiles:
+		var alive: bool = _fly_sam(m, dt) if m.owner >= 0 else _fly_missile(m, dt)
+		if alive:
+			keep.append(m)
+	missiles = keep
+	_detect_missiles()
+	_air_defence(dt)
+
+
+## Where a missile is heading: the ship it is homing on, or its aim point.
+func _goal(m: Missile) -> Vector2:
+	if m.state == "home":
+		var sh := _ship_by_id(m.aim_id)
+		if sh != null:
+			return sh.pos
+	return m.aim
+
+
+func _missile_by_id(id: int) -> Missile:
+	var m: Missile = _mindex.get(id)
+	return m if m != null and not m.dead else null
+
+
+## One of your missiles: climbs out on its booster, settles down to skim
+## the sea, runs out to its dogleg and on to the aim point, switches on its
+## seeker and homes on the best echo. Returns false when it is gone.
+func _fly_missile(m: Missile, dt: float) -> bool:
+	if m.dead:
+		return false
+	var top_alt := 150.0 if m.kind == "tomahawk" else 60.0
+	match m.state:
+		"boost":
+			m.alt = move_toward(m.alt, top_alt, top_alt / BOOST_T * 1.4 * dt)
+			m.spd = move_toward(m.spd, m.top * 0.7, 30.0 * dt)
+			if t - m.t0 > BOOST_T:
+				m.state = "dive"
+		"dive":
+			m.alt = move_toward(m.alt, m.cruise_alt, 14.0 * dt)
+			m.spd = move_toward(m.spd, m.top, 12.0 * dt)
+			_steer_missile(m, dt)
+			if absf(m.alt - m.cruise_alt) < 0.5:
+				m.state = "cruise"
+		"cruise":
+			_steer_missile(m, dt)
+			# Seeker on once it is round the last turn and inside its reach.
+			if not m.has_way and m.pos.distance_to(m.aim) < m.seeker * 0.85 \
+					and absf(U.adiff(U.brg(m.pos, m.aim), m.hdg)) < 15.0:
+				m.state = "seek"
+		"seek":
+			_seek(m)
+			if m.state == "seek":
+				# Nothing yet: on to the aim point, then straight on past it.
+				if m.pos.distance_to(m.aim) > 600.0 and absf(U.adiff(U.brg(m.pos, m.aim), m.hdg)) < 90.0:
+					m.hdg = U.wrap360(m.hdg + clampf(U.adiff(U.brg(m.pos, m.aim), m.hdg), -6.0 * dt, 6.0 * dt))
+		"home":
+			var sh := _ship_by_id(m.aim_id)
+			if sh == null or not sh.alive() or sh.sinking > 0.3:
+				m.state = "seek"
+			else:
+				var r := m.pos.distance_to(sh.pos)
+				var lead := sh.pos + U.dirv(sh.hdg) * sh.spd * U.KN * (r / maxf(m.spd, 1.0))
+				m.hdg = U.wrap360(m.hdg + clampf(U.adiff(U.brg(m.pos, lead), m.hdg), -15.0 * dt, 15.0 * dt))
+				# Chaff, once their radars have seen it coming.
+				if m.seen and not m.chaffed and r < 7000.0:
+					m.chaffed = true
+					var ad := GameData.air_defence(sh.layout)
+					# The Tomahawk's seeker sees through chaff better.
+					if randf() < float(ad.get("chaff", 0.1)) * (0.5 if m.link else 1.0):
+						m.state = "decoyed"
+						m.fake = sh.pos + U.dirv(randf_range(0.0, 360.0)) * randf_range(350.0, 700.0)
+				if r < 2500.0:
+					m.alt = move_toward(m.alt, 4.0, 4.0 * dt)
+		"decoyed":
+			m.hdg = U.wrap360(m.hdg + clampf(U.adiff(U.brg(m.pos, m.fake), m.hdg), -15.0 * dt, 15.0 * dt))
+			if m.pos.distance_to(m.fake) < 60.0:
+				m.state = "seek"
+				m.cone = 20.0
+	var prev := m.pos
+	var step := m.spd * dt
+	m.pos += U.dirv(m.hdg) * step
+	m.flown += step
+	if m.pos.distance_to(m.trail[-1]) > 1500.0:
+		m.trail.append(m.pos)
+	# Into a ship? Check along the step, low enough to hit her.
+	if m.alt < 30.0 and m.state in ["home", "seek", "decoyed"]:
+		for sh in ships:
+			if not sh.alive() or m.pos.distance_to(sh.pos) > sh.length * 0.6 + step:
+				continue
+			for k in 4:
+				var p := prev.lerp(m.pos, float(k + 1) / 4.0)
+				if _inside(sh, p):
+					_missile_hit(m, sh, p)
+					return false
+	if m.flown > m.reach or (m.state == "seek" and m.pos.distance_to(m.aim) > m.seeker * 1.2
+			and absf(U.adiff(U.brg(m.pos, m.aim), m.hdg)) > 90.0):
+		_missile_lost(m)
+		return false
+	return true
+
+
+func _steer_missile(m: Missile, dt: float) -> void:
+	if m.has_way and m.pos.distance_to(m.way) < 2000.0:
+		m.has_way = false
+	# Tomahawks take a fresher aim point over the link while we're up.
+	if m.link and t >= m.next_aim and linked():
+		m.next_aim = t + 20.0
+		var est := aim_estimate(_ship_by_id(m.aim_id))
+		if not est.is_empty():
+			var path := (m.pos.distance_to(m.way) + m.way.distance_to(m.aim)) if m.has_way else m.pos.distance_to(m.aim)
+			m.aim = (est[0] as Vector2) + (est[1] as Vector2) * (path / maxf(m.top, 1.0))
+	var dest := m.way if m.has_way else m.aim
+	m.hdg = U.wrap360(m.hdg + clampf(U.adiff(U.brg(m.pos, dest), m.hdg), -5.0 * dt, 5.0 * dt))
+
+
+## The seeker looks ahead for the biggest echo near where she should be.
+## A Harpoon takes the best it finds. A Tomahawk knows which ship it was
+## sent for and holds out for her until it reaches the aim point.
+func _seek(m: Missile) -> void:
+	var best: Ship = null
+	var score := 0.0
+	var wanted: Ship = null
+	for sh in ships:
+		if not sh.alive() or sh.sinking > 0.2:
+			continue
+		var r := m.pos.distance_to(sh.pos)
+		# The Tomahawk's passive seeker picks her radars up from any direction.
+		if sh.id == m.aim_id and m.link and r <= m.seeker:
+			wanted = sh
+		if r > m.seeker or absf(U.adiff(U.brg(m.pos, sh.pos), m.hdg)) > m.cone:
+			continue
+		var sc := sh.length / maxf(r, 200.0) * clampf(1.6 - sh.pos.distance_to(m.aim) / m.seeker, 0.2, 1.6)
+		if sh.id == m.aim_id:
+			sc *= 1.5
+		if sc > score:
+			score = sc
+			best = sh
+	if m.link and wanted != null and not m.chaffed:
+		best = wanted
+	elif m.link and m.pos.distance_to(m.aim) > 4000.0 and not m.chaffed:
+		best = null
+	if best != null:
+		m.state = "home"
+		m.aim_id = best.id
+
+
+func _tally(m: Missile, what: String, sh: Ship = null) -> void:
+	if not salvos.has(m.salvo):
+		return
+	var sv: Dictionary = salvos[m.salvo]
+	sv["left"] = int(sv["left"]) - 1
+	if what == "hit":
+		sv["hits"][sh.short] = int(sv["hits"].get(sh.short, 0)) + 1
+	elif what == "down":
+		sv["down"] = int(sv["down"]) + 1
+	else:
+		sv["lost"] = int(sv["lost"]) + 1
+	if int(sv["left"]) <= 0:
+		var hits := 0
+		var parts := []
+		for k in sv["hits"]:
+			hits += int(sv["hits"][k])
+			parts.append("%s %d" % [k, int(sv["hits"][k])])
+		var txt := "Link: salvo over. %d %s%s: %d shot down, %d lost or decoyed, %d hit%s" % [int(sv["n"]), weapon_name(sv["kind"]),
+			"s" if int(sv["n"]) > 1 else "", int(sv["down"]), int(sv["lost"]), hits, "s" if hits != 1 else ""]
+		report(txt + (" (%s)." % ", ".join(parts) if hits > 0 else "."), "good" if hits > 0 else "warn")
+
+
+func _missile_lost(m: Missile) -> void:
+	m.dead = true
+	_tally(m, "lost")
+
+
+func _missile_hit(m: Missile, sh: Ship, at: Vector2) -> void:
+	m.dead = true
+	var spot := hull_spot(sh, at)
+	var power := m.kg / 450.0
+	sh.hits_taken += 1
+	m_hits += 1
+	emit({"type": "boom", "pos": Vector3(at.x, 6.0, at.y), "size": 3.0 + 4.0 * power, "kind": "missile", "ship": sh.id})
+	var r := sub.pos.distance_to(sh.pos)
+	if r < 25000.0:
+		sound("torp_hit", clampf(0.8 - r / 30000.0, 0.1, 0.6))
+	sh.hull.missile(spot.x, int(spot.y), power)
+	sh.struct = sh.max_struct * sh.hull.health()
+	_tally(m, "hit", sh)
+	report("Link: %s %d hit %s %s!" % [weapon_name(m.kind), m.unit, sh.short, where(spot.x)], "good", "mhit%d" % sh.id, 5.0)
+	_hull_news(sh)
+	alarm_t = t
+	alert = true
+
+
+func _shot_down(m: Missile) -> void:
+	if m.dead:
+		return
+	m.dead = true
+	m_down += 1
+	emit({"type": "boom", "pos": Vector3(m.pos.x, m.alt, m.pos.y), "size": 2.2, "kind": "air"})
+	_tally(m, "down")
+	report("Link: missiles being shot down. %d so far." % m_down, "warn", "mdown", 8.0)
+
+
+## Their radars pick missiles up once they are over the horizon: a long way
+## off while they climb out of the sea, about 30 km once they skim it.
+## Helicopters aloft see farther. Seen climbing out, they know roughly where
+## the boat fired from.
+func _detect_missiles() -> void:
+	for m in missiles:
+		if m.owner >= 0 or m.seen or m.dead:
+			continue
+		var by: Ship = null
+		var seen := false
+		for sh in ships:
+			if not sh.alive():
+				continue
+			var mast := float(GameData.air_defence(sh.layout).get("mast", 15.0))
+			if m.pos.distance_to(sh.pos) < minf(4120.0 * (sqrt(mast) + sqrt(maxf(m.alt, 1.0))), 150000.0):
+				seen = true
+				by = sh
+				break
+		if not seen:
+			for p in planes:
+				if not p.dead and p.alt > 60.0 and m.pos.distance_to(p.pos) < minf(4120.0 * (sqrt(p.alt) + sqrt(maxf(m.alt, 1.0))), 45000.0):
+					seen = true
+					break
+		if not seen:
+			continue
+		m.seen = true
+		if t - air_alert > 300.0:
+			report("ESM: their fire-control radars have come up. They've seen the missiles.", "warn")
+		air_alert = t
+		alarm_t = t
+		alert = true
+		if m.state in ["boost", "dive"] and m.flown < 4000.0:
+			var r := m.origin.distance_to(by.pos) if by != null else 30000.0
+			_new_datum(m.origin, 300.0 + r * 0.03, by)
+			report("ESM: they saw the launch. Expect company.", "alarm", "launchseen", 90.0)
+
+
+## Each ship fires its missile layers at the incoming missiles it can reach,
+## the most urgent first, no more than its fire channels allow and never more
+## than two at one missile at a time; its close-in guns take what gets
+## through.
+func _air_defence(dt: float) -> void:
+	if t - air_alert > 600.0:
+		return
+	for sh in ships:
+		if not sh.alive() or not adef.has(sh.id):
+			continue
+		var st: Dictionary = adef[sh.id]
+		var ad := GameData.air_defence(sh.layout)
+		var layers: Array = ad["sams"]
+		for li in layers.size():
+			var L: Dictionary = layers[li]
+			if int(st["stock"][li]) <= 0 or int(st["busy"][li]) >= int(L["ch"]) or t < float(st["next"][li]):
+				continue
+			var best: Missile = null
+			var urgent := 1e12
+			for m in missiles:
+				if m.owner >= 0 or m.dead or not m.seen or m.engaged >= 2 or m.state == "boost":
+					continue
+				var r := m.pos.distance_to(sh.pos)
+				if r > float(L["rng"]) or r < float(L["min"]):
+					continue
+				var u := m.pos.distance_to(_goal(m))
+				if u < urgent:
+					urgent = u
+					best = m
+			if best != null:
+				_fire_sam(sh, li, L, best)
+				st["next"][li] = t + 2.5
+		var mounts := int(ad.get("ciws", 0))
+		if mounts > 0:
+			_ciws(sh, st, mounts, dt)
+
+
+func _fire_sam(sh: Ship, li: int, L: Dictionary, m: Missile) -> void:
+	var st: Dictionary = adef[sh.id]
+	var sam := Missile.new()
+	sam.id = _new_id()
+	sam.kind = "sam"
+	sam.owner = sh.id
+	sam.layer = li
+	sam.tgt = m.id
+	sam.pk = L["pk"]
+	sam.pos = sh.pos + U.dirv(sh.hdg) * sh.length * randf_range(-0.2, 0.2)
+	sam.alt = 12.0
+	sam.hdg = U.brg(sh.pos, m.pos)
+	sam.spd = 150.0
+	sam.top = L["v"]
+	sam.state = "fly"
+	sam.reach = float(L["rng"]) * 1.4
+	sam.t0 = t
+	missiles.append(sam)
+	st["stock"][li] = int(st["stock"][li]) - 1
+	st["busy"][li] = int(st["busy"][li]) + 1
+	m.engaged += 1
+	emit({"type": "sam", "pos": Vector3(sam.pos.x, 10.0, sam.pos.y), "ship": sh.id})
+
+
+func _sam_done(sam: Missile) -> void:
+	sam.dead = true
+	if adef.has(sam.owner):
+		var st: Dictionary = adef[sam.owner]
+		st["busy"][sam.layer] = maxi(0, int(st["busy"][sam.layer]) - 1)
+	var m := _missile_by_id(sam.tgt)
+	if m != null:
+		m.engaged = maxi(0, m.engaged - 1)
+
+
+## One of their missiles: out of its cell, lofts and leads the target, and
+## either kills it or misses when they meet.
+func _fly_sam(sam: Missile, dt: float) -> bool:
+	if sam.dead:
+		return false
+	var m := _missile_by_id(sam.tgt)
+	if m == null:
+		_sam_done(sam)
+		return false
+	sam.spd = move_toward(sam.spd, sam.top, 500.0 * dt)
+	var it := _intercept(sam.pos, sam.spd, m.pos, U.dirv(m.hdg) * m.spd)
+	var want: float = it["hdg"] if not it.is_empty() else U.brg(sam.pos, m.pos)
+	if t - sam.t0 > 1.0:
+		sam.hdg = U.wrap360(sam.hdg + clampf(U.adiff(want, sam.hdg), -45.0 * dt, 45.0 * dt))
+	var r := sam.pos.distance_to(m.pos)
+	var want_alt := m.alt if r < 4000.0 else maxf(m.alt, minf(r * 0.06, 1500.0))
+	sam.alt = move_toward(sam.alt, want_alt, (300.0 if t - sam.t0 > 1.0 else 120.0) * dt)
+	var step := sam.spd * dt
+	sam.pos += U.dirv(sam.hdg) * step
+	sam.flown += step
+	if sam.pos.distance_to(m.pos) < step + m.spd * dt + 40.0 and absf(sam.alt - m.alt) < 80.0:
+		if randf() < sam.pk:
+			_shot_down(m)
+		_sam_done(sam)
+		return false
+	if sam.flown > sam.reach:
+		_sam_done(sam)
+		return false
+	return true
+
+
+## Close-in guns: each mount holds fire on one missile in reach, the one
+## coming at her first, and chews at it until it dies or hits.
+func _ciws(sh: Ship, st: Dictionary, mounts: int, dt: float) -> void:
+	var used := 0
+	for m in missiles:
+		if used >= mounts:
+			break
+		if m.owner >= 0 or m.dead or not m.seen:
+			continue
+		var r := m.pos.distance_to(sh.pos)
+		if r > 3000.0:
+			continue
+		var at_her := m.state == "home" and m.aim_id == sh.id
+		if not at_her and r > 1500.0:
+			continue
+		used += 1
+		if t >= float(st["fx"]):
+			st["fx"] = t + 0.3
+			emit({"type": "ciws", "from": Vector3(sh.pos.x, 16.0, sh.pos.y), "to": Vector3(m.pos.x, m.alt, m.pos.y)})
+		if randf() < 1.0 - exp(-(0.06 if at_her else 0.03) * dt):
+			_shot_down(m)
+
+
+## What fire control shows about the missiles.
+func missile_status() -> Dictionary:
+	var air := 0
+	var seen := 0
+	for m in missiles:
+		if m.owner < 0 and not m.dead:
+			air += 1
+			if m.seen:
+				seen += 1
+	var out := {"weapon": weapon, "long": "Mk 48 ADCAP" if weapon == "mk48" else String(GameData.MISSILES[weapon]["long"]),
+		"salvo": salvo, "stock": stock(), "air": air, "seen": seen, "queued": launch_queue.size(), "fired": m_fired,
+		"hits": m_hits, "down": m_down, "linked": linked(), "link_age": t - link_t if link_t > -900.0 else -1.0,
+		"has_missiles": harpoons + vls > 0 or m_fired > 0}
+	if weapon != "mk48" and lock != null and lock.alive():
+		var est := aim_estimate(lock)
+		if not est.is_empty():
+			var d := sub.pos.distance_to(est[0])
+			out["aim_err"] = est[2]
+			out["aim_rng"] = d
+			out["tof"] = d / (float(GameData.MISSILES[weapon]["kn"]) * U.KN) + 20.0
+	return out
+
+
+## Missiles of yours still flying or waiting to go.
+func missiles_out() -> int:
+	var n := launch_queue.size()
+	for m in missiles:
+		if m.owner < 0 and not m.dead:
+			n += 1
+	return n
 
 
 # ------------------------------------------------------- their ASW ships
@@ -952,4 +1693,25 @@ func threat() -> Array:
 
 
 func _check_end() -> void:
-	super._check_end()
+	if result != "":
+		return
+	var s := sub
+	var tg := target
+	if s.hull <= 0.0:
+		super._check_end()
+		return
+	if tg.alive() and spec.get("goal", "") == "disable" and tg.hull.out_of_action():
+		report("Link: %s is burning end to end and losing way. She's out of action!" % tg.name, "good")
+		sound("breakup", 0.6)
+		_end("disabled", 10.0)
+	elif tg.alive() and s.pos.distance_to(tg.pos) > float(spec.get("escape", nat.get("escape", ESCAPE))):
+		report("Sonar: %s has opened the range. She got away." % tg.short, "warn")
+		_end("escaped", 2.5)
+	elif tg.alive() and torps.is_empty() and missiles_out() == 0 and harpoons + vls <= 0:
+		var empty := true
+		for v in s.tubes:
+			if v >= 0.0:
+				empty = false
+		if empty:
+			report("Weapons: that was the last of them. Nothing left to fire.", "warn")
+			_end("dry", 2.5)

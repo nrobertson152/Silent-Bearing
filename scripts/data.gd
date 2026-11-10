@@ -38,6 +38,42 @@ const AIRCRAFT := {
 	"z20": {"name": "Z-20F helicopter", "kn": 140, "span": 16.4, "len": 15.4, "engines": 2, "kind": "helo", "hp": 2, "bombs": 2},
 }
 
+## Near-future missiles your boats carry: speed, reach, warhead, how far out
+## the seeker looks and how wide, and cruise height in metres. `launch` is a
+## torpedo tube (in a capsule) or a vertical launch cell. Tomahawks take new
+## aim points over the satellite link in flight.
+const MISSILES := {
+	"harpoon": {"name": "Harpoon", "long": "UGM-84 Harpoon", "kn": 460.0, "range": 124000.0, "kg": 221.0,
+		"seeker": 15000.0, "cone": 30.0, "cruise": 6.0, "launch": "tube", "link": false},
+	"tomahawk": {"name": "Tomahawk", "long": "Tomahawk Maritime Strike", "kn": 470.0, "range": 1600000.0, "kg": 450.0,
+		"seeker": 22000.0, "cone": 40.0, "cruise": 12.0, "launch": "vls", "link": true},
+}
+
+## Their air defence by ship class. `mast` is the height of the search radar
+## (it sets how far out a sea-skimmer shows above the horizon). Each missile
+## layer: rounds aboard, reach and minimum range against a sea-skimmer, kill
+## chance per shot, engagements at once and speed in m/s. `ciws` close-in gun
+## mounts, and the chance chaff pulls an incoming missile off.
+const AIR_DEFENCE := {
+	"t055": {"mast": 30.0, "ciws": 1, "chaff": 0.2, "sams": [
+		{"name": "HHQ-9B", "n": 48, "rng": 24000.0, "min": 3000.0, "pk": 0.35, "ch": 3, "v": 1300.0},
+		{"name": "HHQ-10", "n": 24, "rng": 8000.0, "min": 600.0, "pk": 0.35, "ch": 2, "v": 750.0}]},
+	"t052d": {"mast": 26.0, "ciws": 1, "chaff": 0.2, "sams": [
+		{"name": "HHQ-9", "n": 32, "rng": 22000.0, "min": 3000.0, "pk": 0.33, "ch": 2, "v": 1300.0},
+		{"name": "HHQ-10", "n": 24, "rng": 8000.0, "min": 600.0, "pk": 0.35, "ch": 1, "v": 750.0}]},
+	"t054a": {"mast": 22.0, "ciws": 2, "chaff": 0.15, "sams": [
+		{"name": "HHQ-16", "n": 32, "rng": 16000.0, "min": 2000.0, "pk": 0.3, "ch": 2, "v": 1000.0}]},
+	"fujian": {"mast": 34.0, "ciws": 3, "chaff": 0.25, "sams": [
+		{"name": "HHQ-10", "n": 48, "rng": 8000.0, "min": 600.0, "pk": 0.35, "ch": 2, "v": 750.0}]},
+	"shandong": {"mast": 34.0, "ciws": 3, "chaff": 0.25, "sams": [
+		{"name": "HHQ-10", "n": 54, "rng": 8000.0, "min": 600.0, "pk": 0.35, "ch": 3, "v": 750.0}]},
+}
+
+
+## A ship's air defence, or {} for ships without any.
+static func air_defence(layout_key: String) -> Dictionary:
+	return AIR_DEFENCE.get(base_layout(layout_key), {})
+
 ## The boats you can command.
 static func nations() -> Dictionary:
 	return {
@@ -138,27 +174,58 @@ static func nations() -> Dictionary:
 			"id": "us_ssn", "era": "modern", "navy": "us", "name": "United States", "boat": "Virginia-class attack submarine",
 			"sub_kn": 28.0, "surf_kn": 15.0, "test": 240.0, "crush": 400.0, "dive_time": 22.0,
 			"nuclear": true, "escape": 60000.0, "fire_max": 240.0,
-			"tubes": 4, "torps": 26, "decoys": 14,
+			"tubes": 4, "torps": 22, "decoys": 14,
 			"torp": {"name": "Mk 48 ADCAP", "kn": 55.0, "range": 38000.0, "dud": 0.0, "wake": false, "kg": 295.0,
 				"homing": true, "wire": true, "seeker": 2800.0, "cone": 45.0},
+			"missiles": {"harpoon": 4, "tomahawk": 12},
 			"gun": {}, "aa": {},
 			"sub": {"len": 115.0, "beam": 10.4, "tower": 0.27, "style": "virginia"},
 			"bt": true,
-			"blurb": "Nuclear attack boat: no battery to nurse and no need to surface. Very quiet below about 10 knots. Wire-guided Mk 48s home on what they hear.",
+			"blurb": "Nuclear attack boat: no battery to nurse and no need to surface. Very quiet below about 10 knots. Wire-guided Mk 48s home on what they hear; four Harpoons and twelve Tomahawks for ships beyond their reach.",
 			"targets": [
 				_t("fujian", "Fujian", "cn", "cv", 316, 40, 12.0, 26, 4, 4, 0, "day", true, false, "Fictional scenario",
 					"China's first catapult carrier, screened by a Type 055 cruiser, two Type 052D destroyers and a Type 054A frigate towing its sonar astern. Two Z-20F helicopters hunt ahead of the group.",
 					["z20", "z20"], "fujian").merged({"group": [
-						_m("t055", "Lhasa", "cg", 180, 20, 6.6, 30, 2, Vector2(5000, 0)),
+						_m("t055#102", "Lhasa", "cg", 180, 20, 6.6, 30, 2, Vector2(5000, 0)),
 						_m("t052d", "Kunming", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(1500, 5000)),
-						_m("t052d", "Changsha", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(1500, -5000)),
+						_m("t052d#173", "Changsha", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(1500, -5000)),
 						_m("t054a", "Xuzhou", "ffg", 134, 16, 5.0, 27, 1, Vector2(-6000, 1000)),
 					]}),
 				_t("nanchang", "Nanchang", "cn", "cg", 180, 20, 6.6, 28, 2, 2, 0, "dusk", true, false, "Fictional scenario",
 					"The first Type 055, a 12,000-ton cruiser with 112 missile cells, leading a surface action group. A Type 052D and a Type 054A sweep for submarines on her flanks.",
 					["z20"], "t055").merged({"group": [
-						_m("t052d", "Huainan", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(3000, 3000)),
-						_m("t054a", "Yulin", "ffg", 134, 16, 5.0, 27, 1, Vector2(-3500, -2500)),
+						_m("t052d#123", "Huainan", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(3000, 3000)),
+						_m("t054a#569", "Yulin", "ffg", 134, 16, 5.0, 27, 1, Vector2(-3500, -2500)),
+					]}),
+			],
+		},
+		"us_ssgn": {
+			"id": "us_ssgn", "era": "modern", "navy": "us", "name": "United States", "boat": "Ohio-class guided-missile submarine",
+			"sub_kn": 25.0, "surf_kn": 15.0, "test": 240.0, "crush": 400.0, "dive_time": 30.0,
+			"nuclear": true, "escape": 60000.0, "fire_max": 240.0,
+			"tubes": 4, "torps": 20, "decoys": 12,
+			"torp": {"name": "Mk 48 ADCAP", "kn": 55.0, "range": 38000.0, "dud": 0.0, "wake": false, "kg": 295.0,
+				"homing": true, "wire": true, "seeker": 2800.0, "cone": 45.0},
+			"missiles": {"tomahawk": 154},
+			"gun": {}, "aa": {},
+			"sub": {"len": 170.7, "beam": 12.8, "tower": 0.3, "style": "ohio"},
+			"bt": true,
+			"blurb": "A converted ballistic-missile boat: 22 of her missile tubes now hold seven Tomahawks each, 154 in all. One boat can fire a salvo big enough to swamp a carrier group's defences.",
+			"targets": [
+				_t("shandong", "Shandong", "cn", "cv", 305, 38, 10.5, 29, 4, 4, 0, "day", true, false, "Fictional scenario",
+					"China's first home-built carrier: a ski-jump deck, J-15 fighters and a screen built for air defence. A Type 055 and two Type 052Ds ring her with long-range missiles; a Type 054A sweeps for submarines 20 km ahead.",
+					["z20", "z20"], "shandong").merged({"start": [48000.0, 58000.0], "approach": "head_on", "escape": 150000.0,
+					"goal": "disable", "group": [
+						_m("t055#106", "Yan'an", "cg", 180, 20, 6.6, 30, 2, Vector2(4000, 3000)),
+						_m("t052d#119", "Guiyang", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(3000, -4000)),
+						_m("t052d#120", "Chengdu", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(-4000, 1000)),
+						_m("t054a#575", "Yueyang", "ffg", 134, 16, 5.0, 27, 1, Vector2(20000, 0)),
+					]}),
+				_t("nanchang", "Nanchang", "cn", "cg", 180, 20, 6.6, 28, 2, 2, 0, "dusk", true, false, "Fictional scenario",
+					"The first Type 055, a 12,000-ton cruiser with 112 missile cells, leading a surface action group. A Type 052D and a Type 054A sweep for submarines on her flanks.",
+					["z20"], "t055").merged({"group": [
+						_m("t052d#123", "Huainan", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(3000, 3000)),
+						_m("t054a#569", "Yulin", "ffg", 134, 16, 5.0, 27, 1, Vector2(-3500, -2500)),
 					]}),
 			],
 		},
@@ -223,7 +290,9 @@ const HELP_MODERN := [
 	["P", "Raise or lower the mast"],
 	["Z, mouse wheel", "Mast zoom"],
 	["L, left click", "Track a ship (mast or sonar)"],
-	["Space / X", "Fire one Mk 48 / two"],
+	["Q", "Weapon: Mk 48, Harpoon, Tomahawk"],
+	["Space / X", "Fire one / two Mk 48s or a missile salvo"],
+	["[  ]", "Missile salvo size"],
 	["G", "Cut the guidance wires"],
 	["N", "Launch a decoy"],
 	["T", "Time compression 1x, 4x, 16x"],
@@ -237,7 +306,7 @@ const HELP_MODERN := [
 
 const NATION_ORDER := ["us", "uk", "de", "jp"]
 ## Near-future boats, in menu order.
-const MODERN_ORDER := ["us_ssn"]
+const MODERN_ORDER := ["us_ssn", "us_ssgn"]
 
 const TYPE_NAMES := {"bb": "Battleship", "cv": "Aircraft carrier", "ca": "Heavy cruiser",
 	"cl": "Light cruiser", "dd": "Destroyer", "pc": "Sub-chaser",
@@ -262,8 +331,23 @@ static func _sup(x0: float, x1: float, wf: float, h: float) -> Dictionary:
 	return {"x0": x0, "x1": x1, "wf": wf, "h": h}
 
 
-## Detailed layout for each ship class used in the game.
+## The class part of a layout key: "t052d#173" is a Type 052D wearing 173.
+static func base_layout(key: String) -> String:
+	return key.get_slice("#", 0)
+
+
+## Detailed layout for each ship class used in the game. A key may carry
+## the ship's own hull number after a #.
 static func layout(key: String) -> Dictionary:
+	var at := key.find("#")
+	if at < 0:
+		return _layout(key)
+	var lay := _layout(key.substr(0, at)).duplicate(true)
+	lay["hull_no"] = key.substr(at + 1)
+	return lay
+
+
+static func _layout(key: String) -> Dictionary:
 	match key:
 		"yamato":
 			return {"hull": "bb", "fb": 10.0, "fb_bow": 14.0, "sheer": "jp", "paint": "jp",
@@ -471,6 +555,11 @@ static func layout(key: String) -> Dictionary:
 				"hangar": {"x0": 0.66, "x1": 0.78, "wf": 0.65, "h": 5.0},
 				"helideck": {"x0": 0.78, "x1": 0.97},
 				"ciws": [0.40, 0.65], "hull_no": "530", "towed": true, "aa": 0}
+		"shandong":
+			return {"hull": "cv", "fb": 11.0, "fb_bow": 14.0, "sheer": "modern", "paint": "cn",
+				"deck": {"h": 25.0, "x0": 0.0, "x1": 0.99, "w": 75.0, "bow": "enclosed", "angled": 9.0, "cats": 0, "ski": 12.0},
+				"island": {"x": 0.6, "l": 30.0, "w": 11.0, "h": 17.0, "modern": true, "side": 1.0},
+				"planes": 12, "jets": true, "ciws": [0.08, 0.92], "hull_no": "17", "aa": 0}
 		"pc":
 			return {"hull": "pc", "fb": 3.2, "fb_bow": 5.0, "sheer": "trawler", "paint": "grey",
 				"turrets": [_tur(0.14, 1, 2.2, 3.0)],
@@ -479,7 +568,7 @@ static func layout(key: String) -> Dictionary:
 				"funnels": [_fun(0.48, 1.0, 4.0, 8.0)],
 				"masts": [{"x": 0.36, "h": 12.0, "type": "pole"}],
 				"dc": true, "aa": 1}
-	return layout("dd_us")
+	return _layout("dd_us")
 
 
 static func escort_layout(nation: String) -> String:

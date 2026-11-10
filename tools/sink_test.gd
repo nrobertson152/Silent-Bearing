@@ -22,6 +22,7 @@ func _process(_dt: float) -> bool:
 		for how in ["founder", "capsize", "magazine", "broken"]:
 			_run(c[0], c[1], how)
 	_modern_battle()
+	_missile_battle()
 	print("SINK %s" % ("OK" if fails == 0 else "FAIL (%d)" % fails))
 	quit(1 if fails > 0 else 0)
 	return true
@@ -55,6 +56,41 @@ func _modern_battle() -> void:
 	var ok := w.fired > 0
 	print("SINK %s modern battle: result '%s' after %d s, fired %d, hits %d, hull %d" % ["ok  " if ok else "FAIL", w.result, int(w.t),
 		w.fired, w.hits, int(w.sub.hull)])
+	if not ok:
+		fails += 1
+	view.queue_free()
+
+
+## A Tomahawk salvo against the Shandong group with the view attached:
+## launches, their missiles, guns and chaff, and the hits.
+func _missile_battle() -> void:
+	var nat: Dictionary = GameData.nations()["us_ssgn"]
+	var w = Sim.create(nat, nat["targets"][0])
+	var tg: World.Ship = w.target
+	w.sub.pos = tg.pos + U.dirv(tg.hdg) * 30000.0
+	w.sub.depth = 20.0
+	w.sub.dep_ord = 20.0
+	w.sub.spd = 5.0
+	w.sub.scope_up = true
+	var view := WorldView.new()
+	root.add_child(view)
+	view.setup(w)
+	w.lock_ship(tg)
+	w.lock_obs = 20.0
+	w.weapon = "tomahawk"
+	w.salvo = 64
+	w.fire(3)
+	var frames := 0
+	while frames < 3000 and (w.missiles_out() > 0 or frames < 10):
+		w.update(0.2)
+		for ev in w.events:
+			view.handle_event(ev)
+		w.events.clear()
+		view.sync(0.2, Vector3(tg.pos.x, 40, -tg.pos.y + 3000))
+		frames += 1
+	var ok: bool = w.m_fired == 64 and w.m_down > 0 and w.missiles_out() == 0
+	print("SINK %s missile battle: result '%s' after %d s, %d fired, %d shot down, %d hits" % ["ok  " if ok else "FAIL", w.result,
+		int(w.t), w.m_fired, w.m_down, w.m_hits])
 	if not ok:
 		fails += 1
 	view.queue_free()

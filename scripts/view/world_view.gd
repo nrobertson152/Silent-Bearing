@@ -48,6 +48,7 @@ var ships := {}
 var planes := {}
 var shells := {}
 var torps := {}
+var mnodes := {}                 # missile id -> {"node", "meshes", "flame", "smoke", "last", "pitch"}
 var time := 0.0
 var wind := Vector3(1, 0, 0)
 var m_smoke: Material
@@ -447,6 +448,7 @@ func sync(dt: float, cam_pos: Vector3) -> void:
 	_sync_planes(dt)
 	_sync_shells()
 	_sync_torps()
+	_sync_missiles(dt)
 
 
 func _aim_turrets(sh: World.Ship, rec: Dictionary, dt: float) -> void:
@@ -647,6 +649,42 @@ func _sync_torps() -> void:
 			torps.erase(id)
 
 
+## Missiles in the air (near-future war): airframes that follow the
+## simulation, nose along the way they are moving, flames and smoke trails
+## while a motor burns.
+func _sync_missiles(dt: float) -> void:
+	var list = world.get("missiles")
+	if list == null:
+		return
+	var seen := {}
+	for m in list:
+		if m.dead:
+			continue
+		seen[m.id] = true
+		var p := Vector3(m.pos.x, m.alt, -m.pos.y)
+		var rec: Dictionary = mnodes.get(m.id, {})
+		if rec.is_empty():
+			rec = fx.missile_body(m.kind)
+			rec["last"] = p
+			rec["pitch"] = deg_to_rad(80.0 if m.owner < 0 else 70.0)
+			mnodes[m.id] = rec
+		var d: Vector3 = p - (rec["last"] as Vector3)
+		var horiz := Vector2(d.x, d.z).length()
+		if horiz + absf(d.y) > 0.05:
+			rec["pitch"] = lerp_angle(float(rec["pitch"]), atan2(d.y, maxf(horiz, 0.01)), clampf(dt * 5.0, 0.0, 1.0))
+		rec["last"] = p
+		var node: Node3D = rec["node"]
+		node.transform = Transform3D(Basis.from_euler(Vector3(float(rec["pitch"]), U.yaw(m.hdg), 0.0), EULER_ORDER_YXZ), p)
+		# Theirs burn all the way; ours only on the booster climbing out.
+		var burning: bool = m.owner >= 0 or m.state == "boost"
+		(rec["flame"] as CPUParticles3D).emitting = burning
+		(rec["smoke"] as CPUParticles3D).emitting = burning or (m.state == "dive" and m.alt > 40.0)
+	for id in mnodes.keys():
+		if not seen.has(id):
+			fx.drop_missile(mnodes[id])
+			mnodes.erase(id)
+
+
 static func s3(v: Vector3) -> Vector3:
 	return Vector3(v.x, v.y, -v.z)
 
@@ -661,6 +699,12 @@ func handle_event(ev: Dictionary) -> void:
 			fx.drop_splash(s3(ev["pos"]))
 		"decoy":
 			fx.bubbles(s3(ev["pos"]))
+		"mlaunch":
+			fx.broach(s3(ev["pos"]))
+		"sam":
+			fx.cell_launch(s3(ev["pos"]))
+		"ciws":
+			fx.tracers(s3(ev["from"]), s3(ev["to"]))
 		"boom":
 			var pos := s3(ev["pos"])
 			if ev.get("kind", "") == "torpedo" and ships.has(ev.get("ship", -1)):

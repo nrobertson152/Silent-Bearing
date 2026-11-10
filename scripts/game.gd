@@ -196,7 +196,10 @@ func start_mission(nid: String, tid: String) -> void:
 	result_shown = false
 	end_timer = 0.0
 	overlay = ""
-	chart_r = 24000.0 if modern else 6000.0
+	chart_r = 6000.0
+	if modern:
+		# Far enough out to show where the link puts a distant group.
+		chart_r = 24000.0 if not spec.has("start") else 64000.0
 	menu.root.visible = false
 	hud.root.visible = true
 	hud.pause.visible = false
@@ -468,9 +471,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_X:
 			w.fire(3, view_brg() if mode in ["periscope", "deck"] else -1.0)
 		KEY_BRACKETLEFT:
-			w.set_torp_depth(s.torp_depth - 1.0)
+			if modern:
+				w.salvo_step(-1)
+			else:
+				w.set_torp_depth(s.torp_depth - 1.0)
 		KEY_BRACKETRIGHT:
-			w.set_torp_depth(s.torp_depth + 1.0)
+			if modern:
+				w.salvo_step(1)
+			else:
+				w.set_torp_depth(s.torp_depth + 1.0)
+		KEY_Q:
+			if modern:
+				w.cycle_weapon()
 		KEY_T:
 			_cycle_tc()
 		KEY_TAB:
@@ -551,7 +563,7 @@ func _mouse_button(ev: InputEventMouseButton) -> void:
 				return
 			var up := ev.button_index == MOUSE_BUTTON_WHEEL_UP
 			if overlay == "chart":
-				chart_r = clampf(chart_r * (0.5 if up else 2.0), 3000.0, 48000.0 if modern else 12000.0)
+				chart_r = clampf(chart_r * (0.5 if up else 2.0), 3000.0, 128000.0 if modern else 12000.0)
 			elif mode == "periscope":
 				s.zoom = up
 			elif mode == "external":

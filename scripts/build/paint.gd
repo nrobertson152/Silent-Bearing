@@ -37,6 +37,7 @@ const LINOLEUM := Color(0.36, 0.27, 0.20)
 ## scheme: 0 plain, 1 two bands, 2 three bands, 3 splotch, 4 splinter, 5 Baltic, 6 light disruptive.
 ## Band heights are in metres; "fd" adds the flight deck height for carriers.
 static func scheme(key: String) -> Dictionary:
+	key = key.get_slice("#", 0)
 	match key:
 		"yorktown":  # Measure 12, graded: navy blue, ocean gray from the hangar deck, haze gray up top
 			return {"scheme": 2, "c": [US_NAVY_BLUE, US_OCEAN_GRAY, US_HAZE_GRAY], "y0": 8.5, "y1": 9.0, "fd": true,
@@ -76,9 +77,9 @@ static func scheme(key: String) -> Dictionary:
 			return {"scheme": 0, "c": [IJN_GREY], "top": Color(0.36, 0.37, 0.37), "deck": "linoleum", "rust": 0.5}
 		"pc":
 			return {"scheme": 0, "c": [Color(0.44, 0.45, 0.46)], "top": Color(0.38, 0.38, 0.38), "deck": "pine", "rust": 0.75}
-		"fujian", "t055", "t052d", "t054a":  # PLAN light grey, dark non-skid decks
+		"fujian", "shandong", "t055", "t052d", "t054a":  # PLAN light grey, dark non-skid decks
 			return {"scheme": 0, "c": [PLAN_GREY], "top": Color(0.42, 0.44, 0.45), "deck": "steel_cn", "flight": "cn",
-				"rust": 0.12 if key == "fujian" else 0.18}
+				"rust": 0.12 if key in ["fujian", "shandong"] else 0.18}
 	return {"scheme": 0, "c": [Color(0.45, 0.47, 0.49)], "top": Color(0.38, 0.39, 0.4), "deck": "teak_rn", "rust": 0.4}
 
 

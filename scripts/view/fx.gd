@@ -1,14 +1,17 @@
 extends Node3D
 ## Effects: shell splashes, depth-charge eruptions, explosions, muzzle blasts,
-## strafing, hit sparks, funnel smoke, ship fires and bow spray. Built from
+## strafing, hit sparks, funnel smoke, ship fires, bow spray, magazine
+## explosions and rocket-thrown torpedoes. Built from
 ## billboard particles drawn by shaders/puff.gdshader (lit smoke and spray) and
 ## shaders/flame.gdshader (fire), plus brief lights, and foam patches on the
 ## wake map. Positions are Godot space.
 
+const MeshKit := preload("res://scripts/build/mesh_kit.gd")
 const Wakes := preload("res://scripts/view/wakes.gd")
 
 var items: Array = []
 var pending: Array = []
+var flights: Array = []    # rockets in the air: {"node", "from", "to", "dur", "t", "smoke"}
 var t := 0.0
 var night := false
 var wind := Vector3(1, 0, 0)
@@ -296,6 +299,85 @@ func magazine(pos: Vector3, size: float) -> void:
 	_patch(pos, s * 2.6, 45.0, 1.0)
 
 
+## A rocket-thrown torpedo: it leaps out of a launch cell in a gout of smoke,
+## arcs out to where the sub was last heard and drops into the sea.
+func rocket(from: Vector3, to: Vector3, dur: float) -> void:
+	particles(from, m_soot, 18, 6.0, Vector2(3.0, 9.0), 25.0, Vector2(4.0, 8.0), wind * 1.2 + Vector3(0, 1.0, 0),
+		stops([[0.0, Color(1, 1, 1, 0.0)], [0.06, Color(1.3, 1.3, 1.3, 0.85)], [1.0, Color(1.6, 1.6, 1.6, 0)]]),
+		true, Vector3.UP, Vector3(1.5, 0.5, 1.5), Vector3(0.4, 1.6, 2.6), Vector2(0.6, 1.2))
+	_light(from + Vector3(0, 6, 0), Color(1.0, 0.7, 0.4), 120.0, 6.0, 0.6)
+	var n := Node3D.new()
+	add_child(n)
+	n.global_position = from
+	var body := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.28
+	cm.bottom_radius = 0.28
+	cm.height = 6.0
+	body.mesh = cm
+	body.rotation.x = PI * 0.5
+	body.material_override = MeshKit.mat(Color(0.75, 0.76, 0.74), 0.6)
+	n.add_child(body)
+	var flame := CPUParticles3D.new()
+	flame.mesh = quad
+	flame.material_override = m_fire
+	flame.amount = 24
+	flame.lifetime = 0.35
+	flame.local_coords = false
+	flame.direction = Vector3(0, 0, 1)
+	flame.spread = 8.0
+	flame.initial_velocity_min = 10.0
+	flame.initial_velocity_max = 18.0
+	flame.gravity = Vector3.ZERO
+	flame.scale_amount_min = 1.2
+	flame.scale_amount_max = 2.0
+	flame.color_ramp = ramp(Color(1, 1, 1, 1), Color(0.4, 1, 1, 0))
+	flame.position = Vector3(0, 0, 3.2)
+	n.add_child(flame)
+	var smoke := funnel_smoke(n, Vector3(0, 0, 3.5), m_soot, 1.4)
+	smoke.amount = 90
+	smoke.lifetime = 9.0
+	smoke.gravity = wind * 0.8 + Vector3(0, 0.3, 0)
+	flights.append({"node": n, "from": from, "to": to, "dur": maxf(dur, 1.0), "t": 0.0, "smoke": smoke, "flame": flame})
+
+
+func _fly(dt: float) -> void:
+	var keep := []
+	for f in flights:
+		f["t"] = float(f["t"]) + dt
+		var k := clampf(float(f["t"]) / float(f["dur"]), 0.0, 1.0)
+		var a: Vector3 = f["from"]
+		var b: Vector3 = f["to"]
+		var apex := clampf(a.distance_to(b) * 0.12, 300.0, 1600.0)
+		var p := a.lerp(b, k) + Vector3(0, 4.0 * apex * k * (1.0 - k), 0)
+		var p2 := a.lerp(b, minf(k + 0.01, 1.0)) + Vector3(0, 4.0 * apex * minf(k + 0.01, 1.0) * (1.0 - minf(k + 0.01, 1.0)), 0)
+		var n: Node3D = f["node"]
+		if p2.distance_to(p) > 0.01:
+			n.look_at_from_position(p, p2 + (p2 - p) * 10.0, Vector3.UP)
+		else:
+			n.global_position = p
+		# The motor burns out after the first part of the flight.
+		(f["flame"] as CPUParticles3D).emitting = k < 0.35
+		(f["smoke"] as CPUParticles3D).emitting = k < 0.45
+		if k >= 1.0:
+			splash(Vector3(b.x, 0.0, b.z), 1.6)
+			n.queue_free()
+		else:
+			keep.append(f)
+	flights = keep
+
+
+## A homing torpedo dropped into the sea, or a decoy fired from the hull.
+func drop_splash(pos: Vector3) -> void:
+	splash(Vector3(pos.x, 0.0, pos.z), 1.4)
+
+
+func bubbles(pos: Vector3) -> void:
+	particles(pos, m_steam, 20, 6.0, Vector2(0.5, 2.0), 40.0, Vector2(0.4, 1.0), Vector3(0, 3.0, 0),
+		stops([[0.0, Color(1, 1, 1, 0.0)], [0.1, Color(1, 1, 1, 0.6)], [1.0, Color(1, 1, 1, 0)]]),
+		true, Vector3.UP, Vector3(2.0, 1.0, 2.0), Vector3(0.6, 1.0, 1.4), Vector2(0.0, 0.2))
+
+
 ## A shell that bounced off armour: a shower of sparks and a puff of smoke.
 func ricochet(pos: Vector3) -> void:
 	_light(pos, Color(1.0, 0.8, 0.5), 18.0, 3.0, 0.12)
@@ -516,6 +598,7 @@ func aim_spray(p: CPUParticles3D, xf: Transform3D, kn: float) -> void:
 
 func update(dt: float) -> void:
 	t += dt
+	_fly(dt)
 	var keep_p := []
 	for p in pending:
 		if t >= p["at"]:

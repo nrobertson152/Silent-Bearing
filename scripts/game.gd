@@ -8,7 +8,9 @@ const Gfx := preload("res://scripts/view/gfx.gd")
 const Hud := preload("res://scripts/ui/hud.gd")
 const Deck := preload("res://scripts/deck/deck.gd")
 const Interior := preload("res://scripts/interior/interior.gd")
+const ModernInterior := preload("res://scripts/interior/modern_interior.gd")
 const Menu := preload("res://scripts/ui/menu.gd")
+const Sim := preload("res://scripts/sim/sim.gd")
 const Player := preload("res://scripts/interior/player.gd")
 const Sfx := preload("res://scripts/audio/sfx.gd")
 const U := preload("res://scripts/util.gd")
@@ -20,10 +22,12 @@ const DECK_ORIGIN := Vector3(0, -3000, 0)
 const EXPOSED := ["deck", "gun", "aa"]
 const STATION_TITLES := {"chart": "Plot table", "sonar": "Hydrophones", "tdc": "Torpedo data computer",
 	"damage": "Damage control", "gauges": "Control room gauges"}
+const STATION_TITLES_MODERN := {"chart": "Plot", "sonar": "Sonar", "tdc": "Fire control",
+	"damage": "Ship's status", "gauges": "Ship control"}
 
 var world: World
 var view: WorldView
-var interior: Interior
+var interior               # Interior, or ModernInterior for the near-future boats
 var player: Player
 var deck: Deck
 var deck_player: Player
@@ -58,6 +62,7 @@ var demo_angle := 0.0
 var interior_env: Environment
 var under_env: Environment
 var near_station := {}
+var modern := false        # a near-future boat: no deck watch, wire-guided torpedoes, decoys
 
 
 func _ready() -> void:
@@ -158,19 +163,21 @@ func start_mission(nid: String, tid: String) -> void:
 		if t["id"] == tid:
 			spec = t
 	_clear_world()
-	world = World.new(nat, spec)
+	modern = GameData.is_modern(nat)
+	hud.set_help(modern)
+	world = Sim.create(nat, spec)
 	view = WorldView.new()
 	add_child(view)
 	view.setup(world)
 	under_env = view.underwater_env()
-	interior = Interior.new()
+	interior = ModernInterior.new() if modern else Interior.new()
 	interior.position = INTERIOR_ORIGIN
 	add_child(interior)
 	interior.build(nat)
 	interior.set_world(world)
 	player = Player.new()
 	add_child(player)
-	player.global_position = INTERIOR_ORIGIN + Interior.SPAWN
+	player.global_position = INTERIOR_ORIGIN + (ModernInterior.SPAWN if modern else Interior.SPAWN)
 	player.face(0.0)
 	player.cam.environment = interior_env
 	deck = Deck.new()
@@ -189,7 +196,7 @@ func start_mission(nid: String, tid: String) -> void:
 	result_shown = false
 	end_timer = 0.0
 	overlay = ""
-	chart_r = 6000.0
+	chart_r = 24000.0 if modern else 6000.0
 	menu.root.visible = false
 	hud.root.visible = true
 	hud.pause.visible = false
@@ -236,7 +243,7 @@ func set_mode(m: String) -> void:
 			if mode in EXPOSED:
 				world.report("You're on deck. Go below first: find a hatch and press E.", "warn")
 				return
-			if s.surfaced():
+			if s.surfaced() and not modern:
 				world.report("We're on the surface. Going up to the bridge.")
 				go_deck("bridge")
 				return
@@ -282,6 +289,9 @@ func set_mode(m: String) -> void:
 
 ## Puts the player on deck at one of the deck rig's named spots.
 func go_deck(spot: String) -> void:
+	if modern:
+		world.report("Nobody goes topside in a war zone. Stay below.", "warn")
+		return
 	if not world.sub.surfaced():
 		world.report("The hatch is shut. We have to surface first (R until surfaced).", "warn")
 		return
@@ -318,7 +328,7 @@ func open_overlay(kind: String) -> void:
 		set_mode("interior")
 	overlay = kind
 	player.enabled = false
-	hud.open_station(kind, STATION_TITLES.get(kind, kind))
+	hud.open_station(kind, (STATION_TITLES_MODERN if modern else STATION_TITLES).get(kind, kind))
 
 
 func close_overlay() -> void:
@@ -489,12 +499,21 @@ func _unhandled_input(event: InputEvent) -> void:
 				set_mode("interior")
 		KEY_2:
 			set_mode("periscope")
-		KEY_3:
-			go_deck("bridge")
-		KEY_4:
-			set_mode("gun")
-		KEY_5:
-			set_mode("aa")
+		KEY_3, KEY_4, KEY_5:
+			if modern:
+				w.report("Nobody goes topside in a war zone. Stay below.", "warn")
+			elif k == KEY_3:
+				go_deck("bridge")
+			elif k == KEY_4:
+				set_mode("gun")
+			else:
+				set_mode("aa")
+		KEY_G:
+			if modern:
+				w.cut_wires()
+		KEY_N:
+			if modern:
+				w.launch_decoy()
 		KEY_6:
 			open_overlay("chart")
 		KEY_7:
@@ -532,7 +551,7 @@ func _mouse_button(ev: InputEventMouseButton) -> void:
 				return
 			var up := ev.button_index == MOUSE_BUTTON_WHEEL_UP
 			if overlay == "chart":
-				chart_r = clampf(chart_r * (0.5 if up else 2.0), 3000.0, 12000.0)
+				chart_r = clampf(chart_r * (0.5 if up else 2.0), 3000.0, 48000.0 if modern else 12000.0)
 			elif mode == "periscope":
 				s.zoom = up
 			elif mode == "external":
@@ -544,6 +563,8 @@ func _lock() -> void:
 		world.lock_nearest(view_brg(), scope_fov())
 	elif mode == "deck":
 		world.lock_nearest(view_brg(), 12.0 if zoomed else 40.0)
+	elif modern:
+		world.lock_sonar()
 	else:
 		world.report("Locking needs the periscope or the binoculars on deck.", "warn")
 
@@ -653,8 +674,9 @@ func _process(delta: float) -> void:
 	_cameras(dt)
 	_crew_place()
 	var cam_pos := world_cam.global_position if mode != "interior" else U.to3(w.sub.pos)
-	if view.visible:
-		view.sync(dt, cam_pos)
+	# Keep the world moving while we're below too (it isn't drawn then), so the
+	# ships' smoke and wakes follow them and are in the right place when we look.
+	view.sync(dt, cam_pos)
 	if mode == "interior":
 		interior.update(dt)
 		_station_prompt(interior.stations, player, INTERIOR_ORIGIN)

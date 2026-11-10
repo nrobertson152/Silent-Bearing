@@ -105,14 +105,16 @@ static func draw_sonar(ci: CanvasItem, rect: Rect2, w: World, t: float) -> void:
 			Color(0.47, 0.9, 0.63, maxf(0.0, 0.18 - k * 0.013)))
 	var hydro: float = s.sys["hydrophones"]
 	var own_noise := absf(s.spd) > 6.0 or s.flood < 1.0
+	var modern: bool = w.nat.get("nuclear", false)
+	if modern:
+		own_noise = absf(s.spd) > 12.0
 	for sh in w.ships:
 		if not sh.heard:
 			continue
-		var r := s.pos.distance_to(sh.pos)
 		var b := U.brg(s.pos, sh.pos)
 		var rel := U.adiff(b, s.hdg)
-		var strength := clampf((0.35 + sh.spd / 14.0) * (4000.0 / (r + 1500.0)), 0.08, 1.0) * (0.3 + 0.7 * hydro / 100.0)
-		if own_noise:
+		var strength := w.strobe(sh)
+		if own_noise and not modern:
 			strength *= 0.55
 		var a := deg_to_rad(rel)
 		var dv := Vector2(sin(a), -cos(a))
@@ -130,14 +132,23 @@ static func draw_sonar(ci: CanvasItem, rect: Rect2, w: World, t: float) -> void:
 			text(ci, U.p3(b), c + dv * (r1 + 16), 13, col, HORIZONTAL_ALIGNMENT_CENTER)
 	for tp in w.torps:
 		var a := deg_to_rad(U.adiff(U.brg(s.pos, tp.pos), s.hdg))
-		var rr := R * clampf(0.2 + s.pos.distance_to(tp.pos) / 6000.0, 0.2, 0.95)
+		var rr := R * clampf(0.2 + s.pos.distance_to(tp.pos) / (40000.0 if modern else 6000.0), 0.2, 0.95)
 		ci.draw_circle(c + Vector2(sin(a), -cos(a)) * rr, 2.5, Color(0.9, 0.5, 0.35))
+	# Torpedoes coming for us, heard as a high-pitched whine.
+	for tp in w.threats():
+		var a := deg_to_rad(U.adiff(U.brg(s.pos, tp.pos), s.hdg))
+		var dv := Vector2(sin(a), -cos(a))
+		var near := clampf(1.0 - s.pos.distance_to(tp.pos) / 9000.0, 0.15, 1.0)
+		ci.draw_line(c + dv * R * 0.12, c + dv * R * (0.3 + 0.68 * near), ALARM, 4.0)
+		text(ci, "TORPEDO", c + dv * (R * (0.3 + 0.68 * near) + 16), 13, ALARM, HORIZONTAL_ALIGNMENT_CENTER)
 	if w.ping_flash > 0.0:
 		ci.draw_arc(c, R * (1.05 - w.ping_flash * 0.5), 0, TAU, 64, Color(0.04, 0.11, 0.08).lerp(AMBER, w.ping_flash), 2.0)
 		text(ci, "ACTIVE SONAR ON US", c + Vector2(0, R * 0.5), 14, AMBER, HORIZONTAL_ALIGNMENT_CENTER)
 	ci.draw_colored_polygon(PackedVector2Array([c + Vector2(0, -R - 2), c + Vector2(-6, -R - 13), c + Vector2(6, -R - 13)]), BRASS)
 	ci.draw_circle(c, 3, PHOS)
 	var status := "OWN NOISE HIGH: slow down to listen" if own_noise else "Bearing only. Longer strobe means louder."
+	if modern and not own_noise:
+		status = "Towed array: bearings only. Change course to let fire control find the range."
 	if hydro <= 25.0:
 		status = "HYDROPHONES DAMAGED"
 	text(ci, status, Vector2(c.x, rect.end.y - 14), 13, AMBER if (own_noise or hydro <= 25.0) else Color(0.5, 0.55, 0.52), HORIZONTAL_ALIGNMENT_CENTER)
@@ -231,6 +242,13 @@ static func draw_chart(ci: CanvasItem, rect: Rect2, w: World, radius: float) -> 
 	if sol != null:
 		var b := deg_to_rad(float(sol["hdg"]))
 		ci.draw_line(c, c + Vector2(sin(b), -cos(b)) * float(sol["run"]) * ppm, Color(0.16, 0.47, 0.24), 1.0)
+	# Where fire control puts the locked target, and how sure it is.
+	var est: Array = w.fire_control_estimate()
+	if not est.is_empty():
+		var P: Vector2 = W.call(est[0])
+		ci.draw_arc(P, maxf(float(est[2]) * ppm, 4.0), 0, TAU, 32, RED_INK, 1.0)
+		ci.draw_circle(P, 3.0, RED_INK)
+		text(ci, "FC", P + Vector2(8, 4), 11, RED_INK)
 	text(ci, "N", Vector2(rect.end.x - 16, rect.position.y + 14), 15, CHART_INK, HORIZONTAL_ALIGNMENT_CENTER)
 	text(ci, "radius %d km   grid %d km   dashed ring: torpedo range" % [int(radius / 1000.0), int(g / 1000.0)],
 		Vector2(rect.position.x + 8, rect.end.y - 12), 12, Color(0.35, 0.36, 0.33))
@@ -334,6 +352,9 @@ static func _bar(ci: CanvasItem, r: Rect2, frac: float, label: String, value: St
 
 # -------------------------------------------------------------- TDC
 static func draw_tdc(ci: CanvasItem, rect: Rect2, w: World) -> void:
+	if w.nat.get("nuclear", false):
+		draw_fire_control(ci, rect, w)
+		return
 	ci.draw_rect(rect, Color(0.11, 0.12, 0.11))
 	var s := w.sub
 	var x := rect.position.x + 24
@@ -378,6 +399,66 @@ static func draw_tdc(ci: CanvasItem, rect: Rect2, w: World) -> void:
 			ci.draw_rect(Rect2(r.position + Vector2(0, 40 * (v / World.RELOAD)), Vector2(40, 40 * (1.0 - v / World.RELOAD))), Color(0.75, 0.55, 0.2))
 		text(ci, str(i + 1), r.get_center(), 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 	text(ci, "%d spare torpedoes" % s.spares, Vector2(x + s.tubes.size() * 46 + 12, y + 20), 14, Color(0.6, 0.62, 0.58))
+
+
+## The near-future boats' fire control: the solution from sonar or the mast,
+## and every Mk 48 in the water with its wire and seeker.
+static func draw_fire_control(ci: CanvasItem, rect: Rect2, w: World) -> void:
+	ci.draw_rect(rect, Color(0.06, 0.08, 0.09))
+	var s := w.sub
+	var x := rect.position.x + 24
+	var y := rect.position.y + 30
+	var cyan := Color(0.45, 0.85, 0.9)
+	var grey := Color(0.55, 0.6, 0.62)
+	text(ci, "FIRE CONTROL   MK 48 ADCAP", Vector2(x, y), 20, cyan)
+	y += 34
+	var tl := w.lock
+	var sol = w.solution()
+	var est: Array = w.fire_control_estimate()
+	if tl != null and tl.alive() and not est.is_empty():
+		var r: float = s.pos.distance_to(est[0])
+		var rows := [["TRACK", tl.name], ["BEARING", U.p3(U.brg(s.pos, tl.pos))],
+			["RANGE (EST)", "%.1f km  +/- %.1f" % [r / 1000.0, float(est[2]) / 1000.0]],
+			["SOLUTION", "%d%%" % int((sol["q"] if sol != null else 0.0) * 100.0)]]
+		if sol != null:
+			rows.append(["FIRING COURSE", U.p3(sol["hdg"])])
+			rows.append(["RUN / TIME", "%.1f km / %d:%02d" % [float(sol["run"]) / 1000.0, int(sol["t"]) / 60, int(sol["t"]) % 60]])
+			rows.append(["STATUS", "IN RANGE" if sol["in_range"] else "OUT OF RANGE"])
+		for row in rows:
+			text(ci, row[0], Vector2(x, y), 15, grey)
+			text(ci, str(row[1]), Vector2(x + 210, y), 16, AMBER)
+			y += 26
+	else:
+		text(ci, "No track. Press L to track the strongest sonar contact,", Vector2(x, y), 15, grey)
+		y += 22
+		text(ci, "or lock one through the photonics mast.", Vector2(x, y), 15, grey)
+		y += 26
+	y += 14
+	text(ci, "UNITS IN THE WATER", Vector2(x, y), 15, grey)
+	y += 24
+	if w.torps.is_empty():
+		text(ci, "none", Vector2(x, y), 15, Color(0.4, 0.45, 0.46))
+		y += 24
+	for tp in w.torps:
+		var st: String = str(tp.get("state")).to_upper()
+		var wired: bool = bool(tp.get("wire"))
+		text(ci, "UNIT %d   %-8s %-5s  run %.1f km" % [int(tp.get("unit")), st, "WIRE" if wired else "CUT", tp.run / 1000.0],
+			Vector2(x, y), 15, PHOS if st == "HOME" else AMBER)
+		y += 22
+	y += 12
+	text(ci, "TUBES", Vector2(x, y), 15, grey)
+	y += 22
+	for i in s.tubes.size():
+		var v: float = s.tubes[i]
+		var col := Color(0.25, 0.55, 0.6) if v == 0.0 else (Color(0.5, 0.38, 0.15) if v > 0.0 else Color(0.2, 0.2, 0.2))
+		var r := Rect2(x + i * 46, y, 40, 40)
+		ci.draw_rect(r, col)
+		if v > 0.0:
+			ci.draw_rect(Rect2(r.position + Vector2(0, 40 * (v / World.RELOAD)), Vector2(40, 40 * (1.0 - v / World.RELOAD))), Color(0.75, 0.55, 0.2))
+		text(ci, str(i + 1), r.get_center(), 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
+	text(ci, "%d Mk 48s in the racks   %d decoys" % [s.spares, s.decoys], Vector2(x + s.tubes.size() * 46 + 12, y + 20), 14, grey)
+	y += 60
+	text(ci, "Space: fire one   X: two, diverging   G: cut wires   N: decoy", Vector2(x, y), 13, Color(0.4, 0.45, 0.46))
 
 
 # ------------------------------------------------------------- damage

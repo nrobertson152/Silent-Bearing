@@ -107,6 +107,16 @@ func build(g) -> void:
 	root.add_child(result)
 
 
+## Shows the keys for the boat in use (the near-future boats differ).
+func set_help(modern: bool) -> void:
+	var g: GridContainer = help.get_child(0)
+	for c in g.get_children():
+		c.queue_free()
+	for row in (GameData.HELP_MODERN if modern else GameData.HELP):
+		g.add_child(Style.label(row[0], 15, Style.AMBER))
+		g.add_child(Style.label(row[1], 15, Style.TEXT))
+
+
 func _help_panel() -> PanelContainer:
 	var p := PanelContainer.new()
 	p.set_anchors_preset(Control.PRESET_CENTER)
@@ -213,8 +223,11 @@ func update(dt: float) -> void:
 	var s := w.sub
 	top_left.text = "%s  vs  %s" % [w.nat["boat"], w.target.name]
 	var dep := "SURFACED" if s.surfaced() else ("%d m (ordered %s)" % [int(s.depth), "SURFACE" if s.dep_ord <= 0.0 else "%d" % int(s.dep_ord)])
-	top_mid.text = "%s   %s   %s   %.1f kn   HDG %s   BAT %d%%   HULL %d%%" % [World.TELEGRAPH[s.tel][0], World.RUDDER[s.rud_i][1], dep,
-		s.spd, U.p3(s.hdg), int(s.bat), int(s.hull)]
+	var power := "BAT %d%%" % int(s.bat)
+	if w.nat.get("nuclear", false):
+		power = "MK 48 x%d  DECOYS %d" % [s.spares + s.tubes.count(0), s.decoys]
+	top_mid.text = "%s   %s   %s   %.1f kn   HDG %s   %s   HULL %d%%" % [World.TELEGRAPH[s.tel][0], World.RUDDER[s.rud_i][1], dep,
+		s.spd, U.p3(s.hdg), power, int(s.hull)]
 	var th := w.threat()
 	threat.text = th[0]
 	threat.add_theme_color_override("font_color", Style.kind_color(th[1]))

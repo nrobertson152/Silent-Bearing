@@ -4,6 +4,7 @@ extends SceneTree
 const Ballistics := preload("res://scripts/sim/ballistics.gd")
 const Damage := preload("res://scripts/sim/damage.gd")
 const GameData := preload("res://scripts/data.gd")
+const Sim := preload("res://scripts/sim/sim.gd")
 const U := preload("res://scripts/util.gd")
 const World := preload("res://scripts/sim/world.gd")
 
@@ -28,6 +29,14 @@ func _init() -> void:
 			for i in 6000:
 				w.update(0.1)
 			check(w.sub.hull >= 0.0, "%s vs %s runs (result '%s', t=%d)" % [nid, spec["id"], w.result, int(w.t)])
+	# The near-future missions, too.
+	for nid in GameData.MODERN_ORDER:
+		var nat: Dictionary = nations[nid]
+		for spec in nat["targets"]:
+			var w := Sim.create(nat, spec)
+			for i in 6000:
+				w.update(0.1)
+			check(w.sub.hull >= 0.0 and w.sub.bat == 100.0, "%s vs %s runs (result '%s', t=%d)" % [nid, spec["id"], w.result, int(w.t)])
 
 	# The TDC leads a crossing target.
 	var uk: Dictionary = nations["uk"]
@@ -115,6 +124,7 @@ func _init() -> void:
 	_damage_tests()
 	_ballistics_tests()
 	_diving_tests()
+	_modern_tests()
 
 	print("\n%d failure(s)" % failures)
 	quit(1 if failures > 0 else 0)
@@ -300,3 +310,148 @@ func _diving_tests() -> void:
 		w4.update(0.1)
 	check(absf(w4.sub.depth - 30.0) < 3.0 and w4.sub.pitch > 3.0,
 		"flooded but making way, she holds depth with an up angle (%.1f m, %.0f deg)" % [w4.sub.depth, w4.sub.pitch])
+
+
+## A near-future world with the group placed relative to the boat.
+func _modern_world(tid := "fujian") -> World:
+	var nat: Dictionary = GameData.nations()["us_ssn"]
+	var spec: Dictionary = {}
+	for t in nat["targets"]:
+		if t["id"] == tid:
+			spec = t
+	return Sim.create(nat, spec)
+
+
+func _modern_tests() -> void:
+	seed(424242)
+	# A Mk 48 on a firm solution runs out on the wire, acquires and hits.
+	var hits := 0
+	for k in 4:
+		var w := _modern_world("nanchang")
+		var tg: World.Ship = w.target
+		w.sub.pos = tg.pos + U.dirv(tg.hdg) * 7000.0 + U.dirv(tg.hdg + 90.0) * 5000.0
+		w.sub.depth = 100.0
+		w.sub.dep_ord = 100.0
+		w.lock_ship(tg)
+		w.lock_obs = 20.0
+		w.fire(1)
+		for i in 3000:
+			w.update(0.2)
+			if w.hits > 0 or w.torps.is_empty():
+				break
+		if w.hits > 0:
+			hits += 1
+	check(hits >= 3, "Mk 48s on a firm solution home and hit (%d of 4)" % hits)
+	# The wire parts when the boat goes too fast, and G cuts it.
+	var w2 := _modern_world()
+	w2.lock_ship(w2.target)
+	w2.lock_obs = 20.0
+	w2.fire(2)
+	var tp = w2.torps[0]
+	check(tp.wire, "a fresh Mk 48 is on the wire")
+	w2.cut_wires()
+	check(not tp.wire and not w2.torps[1].wire, "cutting the wires frees every unit")
+	var w3 := _modern_world()
+	w3.lock_ship(w3.target)
+	w3.lock_obs = 20.0
+	w3.fire(1)
+	w3.sub.spd = 25.0
+	w3.sub.tel = 7
+	w3.update(0.2)
+	check(not w3.torps[0].wire, "running at 25 knots parts the wire")
+	# Quiet and deep, the screen doesn't hear us; fast and shallow, it does.
+	var quiet := 0
+	var loud := 0
+	for k in 6:
+		var wq := _modern_world()
+		var e: World.Ship = null
+		for sh in wq.ships:
+			if sh.type == "ffg":
+				e = sh
+		wq.sub.pos = e.pos + U.dirv(e.hdg + 90.0) * 7000.0
+		wq.sub.depth = 150.0
+		wq.sub.dep_ord = 150.0
+		wq.sub.tel = 3
+		wq.sub.spd = 6.0
+		for i in 600:
+			wq.update(0.2)
+			wq.sub.pos = e.pos + U.dirv(e.hdg + 90.0) * 7000.0
+		if wq.datum_t > 0.0:
+			quiet += 1
+		var wl := _modern_world()
+		for sh in wl.ships:
+			if sh.type == "ffg":
+				e = sh
+		wl.sub.pos = e.pos + U.dirv(e.hdg + 90.0) * 7000.0
+		wl.sub.depth = 30.0
+		wl.sub.dep_ord = 30.0
+		wl.sub.tel = 7
+		wl.sub.spd = 26.0
+		for i in 600:
+			wl.update(0.2)
+			wl.sub.pos = e.pos + U.dirv(e.hdg + 90.0) * 7000.0
+		if wl.datum_t > 0.0:
+			loud += 1
+	check(quiet <= 1 and loud >= 5, "slow and deep we go unheard (%d of 6 heard), fast and shallow they hear us (%d of 6)" % [quiet, loud])
+	# Given a datum, a helicopter flies out, dips and drops a torpedo.
+	var wh := _modern_world()
+	var helo: World.Aircraft = wh.planes[0]
+	for e in wh.ships:
+		if e.kind != "target":
+			e.pos += Vector2(90000, 90000)
+	wh.sub.pos = helo.pos + Vector2(2000, 2000)
+	wh.sub.depth = 40.0
+	wh.sub.dep_ord = 40.0
+	wh.sub.tel = 2
+	wh.sub.spd = 0.0
+	wh._new_datum(wh.sub.pos, 300.0, null)
+	var dropped := false
+	var dipped := false
+	for i in 3000:
+		wh.update(0.2)
+		if i % 300 == 0:
+			wh._new_datum(wh.sub.pos, 300.0, null)
+		dipped = dipped or helo.state == "dip"
+		if not wh.etorps.is_empty():
+			dropped = true
+			break
+	check(dipped and dropped, "a helicopter sent to a datum dips its sonar and drops a torpedo")
+	# A torpedo homing on a boat that does nothing hits her; decoys and a
+	# hard turn away save her more often than not.
+	var sat := 0
+	var saved := 0
+	for k in 8:
+		for evade in [false, true]:
+			var wt := _modern_world()
+			wt.sub.depth = 80.0
+			wt.sub.dep_ord = 80.0
+			wt.sub.tel = 3
+			wt.sub.spd = 8.0
+			wt.datum_err = 200.0
+			wt._drop_torpedo(wt.sub.pos + U.dirv(randf_range(0, 360)) * 1200.0, wt.sub.pos, -5, "test")
+			for e in wt.ships:
+				e.pos += Vector2(90000, 90000)
+			var h0: float = wt.sub.hull
+			var decoyed := false
+			for i in 1500:
+				wt.update(0.2)
+				if evade and not wt.etorps.is_empty() and wt.etorps[0].state == "home" and not decoyed:
+					decoyed = true
+					wt.launch_decoy()
+					wt.set_telegraph(7)
+					wt.set_depth(200.0)
+				if evade and decoyed and not wt.etorps.is_empty():
+					# Put the torpedo astern and run, dropping decoys as we go.
+					var away := U.brg(wt.etorps[0].pos, wt.sub.pos)
+					var turn := U.adiff(away, wt.sub.hdg)
+					wt.set_rudder(2 if absf(turn) < 10.0 else (4 if turn > 0.0 else 0))
+					if i % 40 == 0:
+						wt.launch_decoy()
+				if wt.etorps.is_empty():
+					break
+			if wt.sub.hull < h0:
+				if not evade:
+					sat += 1
+			elif evade:
+				saved += 1
+	check(sat >= 5 and saved >= 5, "a torpedo hits a boat that sits still (%d of 8); decoys and running save her (%d of 8)" % [sat, saved])

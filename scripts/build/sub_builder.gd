@@ -4,6 +4,7 @@
 ## Model space: bow toward -Z, waterline at y = 0 when surfaced.
 
 const MeshKit := preload("res://scripts/build/mesh_kit.gd")
+const ModernSubBuilder := preload("res://scripts/build/modern_sub_builder.gd")
 const Paint := preload("res://scripts/build/paint.gd")
 
 
@@ -37,6 +38,8 @@ static func materials(nation: String, length := 80.0) -> Dictionary:
 static func build(nat: Dictionary) -> Node3D:
 	var sd: Dictionary = nat["sub"]
 	var style: String = sd["style"]
+	if ModernSubBuilder.CLASSES.has(style):
+		return ModernSubBuilder.build(nat)
 	var L: float = sd["len"]
 	var B: float = sd["beam"]
 	var mats := materials(nat["id"], L)

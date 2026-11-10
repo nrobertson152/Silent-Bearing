@@ -51,6 +51,7 @@ var torps := {}
 var time := 0.0
 var wind := Vector3(1, 0, 0)
 var m_smoke: Material
+var m_haze: Material
 var m_tracer: StandardMaterial3D
 var m_shell: StandardMaterial3D
 var sub_wk: Dictionary
@@ -82,6 +83,10 @@ func setup(w: World) -> void:
 	fx.wakes = wakes
 	add_child(fx)
 	m_smoke = fx.smoke_mat(pal["smoke"])
+	# Gas turbines and modern boilers leave a faint grey haze, not a pall of smoke.
+	var haze: Color = (pal["smoke"] as Color).lerp(Color(0.62, 0.6, 0.58), 0.5)
+	haze.a = 0.3
+	m_haze = fx.smoke_mat(haze)
 	m_tracer = StandardMaterial3D.new()
 	m_tracer.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m_tracer.albedo_color = Color(1.0, 0.75, 0.35)
@@ -178,19 +183,23 @@ func _add_ship(sh: World.Ship) -> void:
 	add_child(node)
 	var rec := {"node": node, "turrets": node.get_meta("turrets"), "smoke": [], "fires": [], "fire_at": [],
 		"heave": 0.0, "pitch": 0.0, "roll": 0.0, "aft": null, "cut": 0.0, "foam": 0.0}
+	var lay := GameData.layout(sh.layout)
+	var haze: bool = lay.get("sheer", "") == "modern"
 	for top in node.get_meta("funnels"):
-		rec["smoke"].append(fx.funnel_smoke(node, top + Vector3(0, 1.0, 0), m_smoke, 3.2 if sh.type != "pc" else 1.6))
+		var size := 2.4 if haze else (3.2 if sh.type != "pc" else 1.6)
+		rec["smoke"].append(fx.funnel_smoke(node, top + Vector3(0, 1.0, 0), m_haze if haze else m_smoke, size))
 	rec["wk"] = wakes.ship(node, sh.beam, sh.length, clampf(sh.length * 0.25, 30.0, 60.0))
 	rec["bow"] = fx.bow_spray(sh.beam)
 	# Where each compartment's fire breaks out: on deck above it (the flight
 	# deck for a carrier), a little to one side.
-	var lay := GameData.layout(sh.layout)
 	for i in sh.hull.n:
 		var u := sh.hull.comp_u(i)
 		var y := float(lay["deck"]["h"]) if lay["hull"] == "cv" else ShipBuilder.deck_h(lay, u)
 		rec["fire_at"].append(Vector3(randf_range(-0.22, 0.22) * sh.beam, y + 0.4, ShipBuilder.z_of(u, sh.length)))
 		rec["fires"].append(null)
 	ships[sh.id] = rec
+	# Put her where she is now, or her first smoke rises from the middle of the map.
+	node.transform = _ship_xform(sh, rec, 0.0)
 
 
 ## Ship transform: riding the swell (big ships answer slowly and barely
@@ -541,12 +550,45 @@ func _sync_planes(dt: float) -> void:
 		var climb: float = (p.alt - rec["alt"]) / maxf(dt, 1e-3)
 		rec["alt"] = p.alt
 		var pitch := clampf(atan2(climb, p.kn * U.KN), -0.6, 0.5)
+		var rotors: Array = node.get_meta("rotors", [])
+		if not rotors.is_empty():
+			# Helicopters lean into their speed and hover level.
+			pitch = -clampf(p.kn / 140.0, 0.0, 1.0) * 0.18
+			(rotors[0] as Node3D).rotation.y += dt * 28.0
+			(rotors[1] as Node3D).rotation.x += dt * 60.0
+			_helo_effects(p, rec, dt)
 		node.transform = Transform3D(Basis.from_euler(Vector3(pitch, U.yaw(p.hdg), -p.roll), EULER_ORDER_YXZ),
 			Vector3(p.pos.x, p.alt, -p.pos.y))
 		for pr in node.get_meta("props"):
 			pr.rotation.z += dt * 40.0
 		if p.falling and rec["smoke"] == null:
 			rec["smoke"] = fx.trail_smoke(node)
+
+
+## A hovering helicopter beats the sea white under it, and while it dips
+## its sonar a cable runs down into the water.
+func _helo_effects(p: World.Aircraft, rec: Dictionary, dt: float) -> void:
+	var low := p.alt < 40.0
+	rec["wash"] = float(rec.get("wash", 0.0)) - dt
+	if low and float(rec["wash"]) <= 0.0:
+		rec["wash"] = 1.2
+		wakes.patch(Vector3(p.pos.x, 0.0, -p.pos.y), 14.0, 4.0, 0.5, true)
+	var cable: MeshInstance3D = rec.get("cable")
+	if cable == null:
+		cable = MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.04
+		cm.bottom_radius = 0.04
+		cm.height = 1.0
+		cable.mesh = cm
+		cable.material_override = MeshKit.mat(Color(0.05, 0.05, 0.05), 0.8)
+		add_child(cable)
+		rec["cable"] = cable
+	cable.visible = p.state == "dip" and p.alt < 26.0
+	if cable.visible:
+		var h := p.alt + 25.0
+		cable.scale = Vector3(1, h, 1)
+		cable.global_position = Vector3(p.pos.x, p.alt - h * 0.5, -p.pos.y)
 
 
 func _sync_shells() -> void:
@@ -586,6 +628,8 @@ func _sync_shells() -> void:
 func _sync_torps() -> void:
 	var seen := {}
 	for tp in world.torps:
+		if tp.depth > 15.0:
+			continue    # deep-running torpedoes leave nothing on the surface
 		seen[tp.id] = true
 		var e: CPUParticles3D = torps.get(tp.id)
 		if e == null:
@@ -611,6 +655,12 @@ func handle_event(ev: Dictionary) -> void:
 	match ev["type"]:
 		"splash":
 			fx.splash(s3(ev["pos"]), ev["size"])
+		"rocket":
+			fx.rocket(s3(ev["from"]), s3(ev["to"]), float(ev["dur"]))
+		"etorp":
+			fx.drop_splash(s3(ev["pos"]))
+		"decoy":
+			fx.bubbles(s3(ev["pos"]))
 		"boom":
 			var pos := s3(ev["pos"])
 			if ev.get("kind", "") == "torpedo" and ships.has(ev.get("ship", -1)):

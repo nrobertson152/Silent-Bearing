@@ -22,6 +22,7 @@ const RN_507C := Color(0.57, 0.59, 0.60)           # Mediterranean light grey
 const RN_WHITE := Color(0.80, 0.82, 0.82)
 const RN_B55 := Color(0.56, 0.62, 0.66)            # light blue-grey
 const RN_B5 := Color(0.25, 0.31, 0.38)             # dark blue-grey
+const PLAN_GREY := Color(0.56, 0.59, 0.61)          # PLAN warship light grey
 const KM_HELLGRAU := Color(0.58, 0.60, 0.61)       # 50
 const KM_DUNKELGRAU := Color(0.37, 0.39, 0.41)     # 51
 const KM_BLACK := Color(0.07, 0.07, 0.075)
@@ -75,6 +76,9 @@ static func scheme(key: String) -> Dictionary:
 			return {"scheme": 0, "c": [IJN_GREY], "top": Color(0.36, 0.37, 0.37), "deck": "linoleum", "rust": 0.5}
 		"pc":
 			return {"scheme": 0, "c": [Color(0.44, 0.45, 0.46)], "top": Color(0.38, 0.38, 0.38), "deck": "pine", "rust": 0.75}
+		"fujian", "t055", "t052d", "t054a":  # PLAN light grey, dark non-skid decks
+			return {"scheme": 0, "c": [PLAN_GREY], "top": Color(0.42, 0.44, 0.45), "deck": "steel_cn", "flight": "cn",
+				"rust": 0.12 if key == "fujian" else 0.18}
 	return {"scheme": 0, "c": [Color(0.45, 0.47, 0.49)], "top": Color(0.38, 0.39, 0.4), "deck": "teak_rn", "rust": 0.4}
 
 
@@ -153,6 +157,14 @@ static func deck_mat(kind: String, rust: float, seed_v: float) -> ShaderMaterial
 		"steel_km":
 			m.set_shader_parameter("steel", 1.0)
 			m.set_shader_parameter("steel_col", Color(0.4, 0.4, 0.41))
+		"steel_cn":  # dark grey non-skid
+			m.set_shader_parameter("steel", 1.0)
+			m.set_shader_parameter("steel_col", Color(0.30, 0.32, 0.33))
+			m.set_shader_parameter("wear", 0.3)
+		"flight_cn":  # carrier flight deck
+			m.set_shader_parameter("steel", 1.0)
+			m.set_shader_parameter("steel_col", Color(0.24, 0.25, 0.26))
+			m.set_shader_parameter("wear", 0.45)
 		_:
 			m.set_shader_parameter("steel", 1.0)
 	return m
@@ -196,9 +208,19 @@ static func ship(key: String, lay: Dictionary, L: float) -> Dictionary:
 		"white": plain(Color(0.86, 0.86, 0.82), 0.8),
 		"boat": plain(Color(0.70, 0.71, 0.68), 0.8),
 		"red": plain(Color(0.72, 0.10, 0.10), 0.8),
+		"yellow": plain(Color(0.86, 0.70, 0.16), 0.8),
+		"panel": plain(Color(0.40, 0.43, 0.43), 0.5, 0.1),
 		"wood": plain(Color(0.45, 0.33, 0.22), 0.9),
-		"plane": plain(Color(0.32, 0.38, 0.30) if String(lay.get("paint", "")).begins_with("jp") else Color(0.36, 0.43, 0.50), 0.7),
+		"plane": plain(_plane_colour(String(lay.get("paint", ""))), 0.7),
 	}
+
+
+static func _plane_colour(paint: String) -> Color:
+	if paint.begins_with("jp"):
+		return Color(0.32, 0.38, 0.30)
+	if paint == "cn":
+		return Color(0.56, 0.58, 0.6)
+	return Color(0.36, 0.43, 0.50)
 
 
 ## Your own boat. Patrol boats came home streaked with rust and salt.

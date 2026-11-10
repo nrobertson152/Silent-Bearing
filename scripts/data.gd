@@ -3,8 +3,12 @@
 ## Figures are rounded from published wartime specifications and adjusted for
 ## play. Ship layouts are positions along the hull as fractions of length
 ## (0 = bow, 1 = stern) and sizes in metres. ShipBuilder turns them into meshes.
+##
+## The near-future missions are a fictional war in the Western Pacific. Their
+## boats, ships and weapons are modelled on public figures, rounded and
+## adjusted for play.
 
-const PREFIX := {"us": "USS ", "uk": "HMS ", "jp": "", "de": ""}
+const PREFIX := {"us": "USS ", "uk": "HMS ", "jp": "", "de": "", "cn": ""}
 
 const ESCORT_NAMES := {
 	"jp": ["Isokaze", "Yukikaze", "Hamakaze", "Urakaze", "Hatsukaze"],
@@ -30,6 +34,8 @@ const AIRCRAFT := {
 	"arado": {"name": "Ar 196", "kn": 140, "span": 12.4, "len": 11.0, "engines": 1, "kind": "float", "hp": 3, "bombs": 2},
 	"emily": {"name": "H8K Emily", "kn": 160, "span": 38.0, "len": 28.1, "engines": 4, "kind": "boat", "hp": 8, "bombs": 4},
 	"kate": {"name": "B5N Kate", "kn": 160, "span": 15.5, "len": 10.3, "engines": 1, "kind": "single", "hp": 3, "bombs": 1},
+	# Near future: anti-submarine helicopters carry homing torpedoes, not bombs.
+	"z20": {"name": "Z-20F helicopter", "kn": 140, "span": 16.4, "len": 15.4, "engines": 2, "kind": "helo", "hp": 2, "bombs": 2},
 }
 
 ## The boats you can command.
@@ -127,7 +133,44 @@ static func nations() -> Dictionary:
 					"The 'Big E' fought in nearly every major Pacific carrier battle and survived the war as the most decorated US warship.", ["dauntless", "dauntless", "catalina"], "enterprise"),
 			],
 		},
+		# ------------------------------------------------------ near future
+		"us_ssn": {
+			"id": "us_ssn", "era": "modern", "navy": "us", "name": "United States", "boat": "Virginia-class attack submarine",
+			"sub_kn": 28.0, "surf_kn": 15.0, "test": 240.0, "crush": 400.0, "dive_time": 22.0,
+			"nuclear": true, "escape": 60000.0, "fire_max": 240.0,
+			"tubes": 4, "torps": 26, "decoys": 14,
+			"torp": {"name": "Mk 48 ADCAP", "kn": 55.0, "range": 38000.0, "dud": 0.0, "wake": false, "kg": 295.0,
+				"homing": true, "wire": true, "seeker": 2800.0, "cone": 45.0},
+			"gun": {}, "aa": {},
+			"sub": {"len": 115.0, "beam": 10.4, "tower": 0.27, "style": "virginia"},
+			"bt": true,
+			"blurb": "Nuclear attack boat: no battery to nurse and no need to surface. Very quiet below about 10 knots. Wire-guided Mk 48s home on what they hear.",
+			"targets": [
+				_t("fujian", "Fujian", "cn", "cv", 316, 40, 12.0, 26, 4, 4, 0, "day", true, false, "Fictional scenario",
+					"China's first catapult carrier, screened by a Type 055 cruiser, two Type 052D destroyers and a Type 054A frigate towing its sonar astern. Two Z-20F helicopters hunt ahead of the group.",
+					["z20", "z20"], "fujian").merged({"group": [
+						_m("t055", "Lhasa", "cg", 180, 20, 6.6, 30, 2, Vector2(5000, 0)),
+						_m("t052d", "Kunming", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(1500, 5000)),
+						_m("t052d", "Changsha", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(1500, -5000)),
+						_m("t054a", "Xuzhou", "ffg", 134, 16, 5.0, 27, 1, Vector2(-6000, 1000)),
+					]}),
+				_t("nanchang", "Nanchang", "cn", "cg", 180, 20, 6.6, 28, 2, 2, 0, "dusk", true, false, "Fictional scenario",
+					"The first Type 055, a 12,000-ton cruiser with 112 missile cells, leading a surface action group. A Type 052D and a Type 054A sweep for submarines on her flanks.",
+					["z20"], "t055").merged({"group": [
+						_m("t052d", "Huainan", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(3000, 3000)),
+						_m("t054a", "Yulin", "ffg", 134, 16, 5.0, 27, 1, Vector2(-3500, -2500)),
+					]}),
+			],
+		},
 	}
+
+
+## A ship in a modern group: layout, name, type, size, top speed, hits to sink
+## and her station (metres ahead, metres to starboard of the main target).
+static func _m(lay: String, name: String, type: String, length: float, beam: float, draft: float, kn: float,
+		hp: float, station: Vector2) -> Dictionary:
+	return {"layout": lay, "name": name, "type": type, "length": length, "beam": beam, "draft": draft, "kn": kn,
+		"hp": hp, "station": station}
 
 
 static func _t(id: String, name: String, nation: String, type: String, length: float, beam: float, draft: float,
@@ -165,10 +208,44 @@ const HELP := [
 	["Esc", "Leave a station or pause"],
 ]
 
+## Keys that work differently in the near-future boats.
+const HELP_MODERN := [
+	["W A S D, Shift", "Walk around the control room"],
+	["Mouse", "Look, train the mast"],
+	["E", "Use the station you're facing"],
+	["1  2", "Control room, photonics mast"],
+	["6  7  8  9", "Plot, sonar, fire control, status"],
+	["V or 0", "Outside view of the boat"],
+	["Up / Down", "Engine order"],
+	["Left / Right", "Rudder"],
+	["R / F", "Order shallower / deeper"],
+	["C", "Emergency deep"],
+	["P", "Raise or lower the mast"],
+	["Z, mouse wheel", "Mast zoom"],
+	["L, left click", "Track a ship (mast or sonar)"],
+	["Space / X", "Fire one Mk 48 / two"],
+	["G", "Cut the guidance wires"],
+	["N", "Launch a decoy"],
+	["T", "Time compression 1x, 4x, 16x"],
+	["Tab", "Plot"],
+	["M", "Sound on or off"],
+	["F1", "Show or hide this help"],
+	["F9", "Graphics quality: low, medium, high"],
+	["F11", "Fullscreen"],
+	["Esc", "Leave a station or pause"],
+]
+
 const NATION_ORDER := ["us", "uk", "de", "jp"]
+## Near-future boats, in menu order.
+const MODERN_ORDER := ["us_ssn"]
 
 const TYPE_NAMES := {"bb": "Battleship", "cv": "Aircraft carrier", "ca": "Heavy cruiser",
-	"cl": "Light cruiser", "dd": "Destroyer", "pc": "Sub-chaser"}
+	"cl": "Light cruiser", "dd": "Destroyer", "pc": "Sub-chaser",
+	"cg": "Guided-missile cruiser", "ddg": "Guided-missile destroyer", "ffg": "Guided-missile frigate"}
+
+
+static func is_modern(nat: Dictionary) -> bool:
+	return nat.get("era", "") == "modern"
 
 
 # ---------------------------------------------------------------- layouts
@@ -355,6 +432,45 @@ static func layout(key: String) -> Dictionary:
 				"funnels": [_fun(0.40, 1.8, 7.0, 0.0, "cap"), _fun(0.52, 1.8, 7.0, 0.0, "cap")],
 				"masts": [{"x": 0.30, "h": 18.0, "type": "pole"}],
 				"tubes": [0.46, 0.60], "dc": true, "aa": 4}
+		# ------------------------------------------------------ near future
+		"fujian":
+			return {"hull": "cv", "fb": 12.0, "fb_bow": 15.0, "sheer": "modern", "paint": "cn",
+				"deck": {"h": 26.0, "x0": 0.0, "x1": 0.99, "w": 76.0, "bow": "enclosed", "angled": 9.0, "cats": 3},
+				"island": {"x": 0.62, "l": 28.0, "w": 10.0, "h": 16.0, "modern": true, "side": 1.0},
+				"planes": 12, "jets": true, "ciws": [0.06, 0.94], "hull_no": "18", "aa": 0}
+		"t055":
+			return {"hull": "ddg", "fb": 7.0, "fb_bow": 9.5, "sheer": "modern", "paint": "cn",
+				"turrets": [_tur(0.12, 1, 5.0, 7.0).merged({"style": "stealth"})],
+				"vls": [{"x0": 0.17, "x1": 0.27, "w": 0.6}, {"x0": 0.60, "x1": 0.68, "w": 0.62}],
+				"stealth": [{"x0": 0.27, "x1": 0.60, "wf": 0.88, "h": 8.5, "slope": 0.14},
+					{"x0": 0.29, "x1": 0.40, "wf": 0.62, "h": 7.5, "slope": 0.12, "on": 8.5}],
+				"imast": {"x": 0.355, "h": 22.0, "w": 9.0, "base": 16.0},
+				"funnels": [_fun(0.50, 3.2, 6.0, 0.0, "stealth")],
+				"hangar": {"x0": 0.68, "x1": 0.80, "wf": 0.75, "h": 6.0},
+				"helideck": {"x0": 0.80, "x1": 0.97},
+				"ciws": [0.30, 0.69], "hull_no": "101", "aa": 0}
+		"t052d":
+			return {"hull": "ddg", "fb": 6.5, "fb_bow": 9.0, "sheer": "modern", "paint": "cn",
+				"turrets": [_tur(0.12, 1, 5.0, 7.0).merged({"style": "stealth"})],
+				"vls": [{"x0": 0.18, "x1": 0.26, "w": 0.55}, {"x0": 0.62, "x1": 0.69, "w": 0.55}],
+				"stealth": [{"x0": 0.26, "x1": 0.36, "wf": 0.7, "h": 13.0, "slope": 0.12, "radar": true},
+					{"x0": 0.36, "x1": 0.62, "wf": 0.7, "h": 6.5, "slope": 0.1}],
+				"funnels": [_fun(0.48, 2.6, 5.5, 0.0, "stealth")],
+				"masts": [{"x": 0.33, "h": 26.0, "type": "lattice_modern"}],
+				"hangar": {"x0": 0.69, "x1": 0.80, "wf": 0.7, "h": 5.5},
+				"helideck": {"x0": 0.80, "x1": 0.97},
+				"ciws": [0.28, 0.70], "hull_no": "172", "aa": 0}
+		"t054a":
+			return {"hull": "ffg", "fb": 6.0, "fb_bow": 8.5, "sheer": "modern", "paint": "cn",
+				"turrets": [_tur(0.13, 1, 4.0, 4.5).merged({"style": "stealth"})],
+				"vls": [{"x0": 0.19, "x1": 0.25, "w": 0.45}],
+				"stealth": [{"x0": 0.25, "x1": 0.66, "wf": 0.72, "h": 7.0, "slope": 0.12},
+					{"x0": 0.28, "x1": 0.38, "wf": 0.5, "h": 4.0, "slope": 0.1, "on": 7.0}],
+				"funnels": [_fun(0.50, 2.4, 5.0, 0.0, "stealth")],
+				"masts": [{"x": 0.36, "h": 22.0, "type": "lattice_modern"}],
+				"hangar": {"x0": 0.66, "x1": 0.78, "wf": 0.65, "h": 5.0},
+				"helideck": {"x0": 0.78, "x1": 0.97},
+				"ciws": [0.40, 0.65], "hull_no": "530", "towed": true, "aa": 0}
 		"pc":
 			return {"hull": "pc", "fb": 3.2, "fb_bow": 5.0, "sheer": "trawler", "paint": "grey",
 				"turrets": [_tur(0.14, 1, 2.2, 3.0)],

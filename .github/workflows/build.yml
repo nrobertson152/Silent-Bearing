@@ -34,6 +34,12 @@ jobs:
           if grep -q "SCRIPT ERROR" smoke.log || ! grep -q "SMOKE OK" smoke.log; then
             echo "::error::The game failed to start a patrol"; exit 1
           fi
+      - name: Start a near-future patrol
+        run: |
+          ./godot --headless --path . -- --autostart us_ssn fujian --smoke 8 2>&1 | tee smoke_modern.log
+          if grep -q "SCRIPT ERROR" smoke_modern.log || ! grep -q "SMOKE OK" smoke_modern.log; then
+            echo "::error::The game failed to start a near-future patrol"; exit 1
+          fi
       - name: Walk through every watertight door
         run: |
           for n in "us shokaku" "uk tirpitz" "de hood" "jp yorktown"; do

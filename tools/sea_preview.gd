@@ -6,6 +6,7 @@ extends SceneTree
 
 const GameData := preload("res://scripts/data.gd")
 const U := preload("res://scripts/util.gd")
+const Sim := preload("res://scripts/sim/sim.gd")
 const World := preload("res://scripts/sim/world.gd")
 const WorldView := preload("res://scripts/view/world_view.gd")
 
@@ -36,7 +37,7 @@ func _init() -> void:
 	if args.size() > 4:
 		shots = Array(args[4].split(","))
 	tag = nid + "_" + tid + ("_" + args[3] if args.size() > 3 and args[3] != "-" else "")
-	w = World.new(nat, spec)
+	w = Sim.create(nat, spec)
 	if args.size() > 3 and args[3] != "-":
 		w.tod = args[3]
 	var s := w.sub

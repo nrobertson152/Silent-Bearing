@@ -11,6 +11,11 @@ torpedo and deck gun, and go after one of twenty famous warships. Most are the r
 submarine kills of the war, like *Shinano*, *Royal Oak*, *Ark Royal* and
 *Indianapolis*. A few are what-ifs, like *Yamato* and *Tirpitz*.
 
+Or switch the menu to **Near future: Western Pacific** (Tab) for a fictional war at sea
+in the 2030s: take a Virginia-class attack boat after China's carrier *Fujian* and her
+screen, or the cruiser *Nanchang*, with wire-guided Mk 48 torpedoes, decoys and a
+screen that hunts you with sonar and helicopters.
+
 The original 2D pygame version is preserved at the `v1.0.0` tag.
 
 ## Running it
@@ -187,6 +192,37 @@ she's badly hurt.
 - **Lookouts:** targets that spot torpedo wakes in daylight and turn away, escorts that
   bracket you with gunfire, and crew reports for everything.
 
+## The near future
+
+A fictional war in the Western Pacific. The boats, ships and weapons are modelled on
+public figures, rounded and adjusted for play.
+
+- **Your boat:** a Virginia-class attack submarine. Nuclear, so no battery or air to
+  nurse; very quiet below about 10 knots, loud above 20. No deck gun, and nobody goes
+  topside. You fight from a modern control room: ship control, the photonics mast
+  displays, the sonar stack, fire control, the digital plot and the status board.
+- **Finding them:** the towed array hears a carrier group tens of kilometres away, but
+  gives bearings only. Track a contact (`L`) and change course now and then: each new
+  leg lets fire control work out her range. A short look through the photonics mast
+  gives a laser range at once, but their radars may see the mast.
+- **The Mk 48:** runs out at 55 knots on a guidance wire, steered by fire control's
+  latest solution, then switches on its seeker about 2.5 km short, homes on the
+  biggest echo and bursts under the keel, which can break a smaller ship's back. Go
+  faster than 18 knots and the wires part; `G` cuts them. Their own torpedo decoys can
+  pull a Mk 48 off.
+- **Their hunters:** a frigate towing its sonar, destroyers and a cruiser with hull and
+  variable-depth sonar, all listening for you and pinging once they suspect you, and
+  Z-20F helicopters that fly to where you were heard, hover and dip their sonar, then
+  drop homing torpedoes. Ships fire torpedoes from their tubes or throw them out to
+  18 km by rocket. Hear a torpedo coming and you have a minute or two: launch decoys
+  (`N`), put it astern, run deep across the thermal layer, then slow down and creep
+  away.
+
+| Mission | Target | Screen |
+| --- | --- | --- |
+| Fujian | Type 003 catapult carrier | Type 055 cruiser, two Type 052D destroyers, Type 054A frigate, two helicopters |
+| Nanchang | Type 055 cruiser | Type 052D destroyer, Type 054A frigate, a helicopter |
+
 ## The navies
 
 | Navy | Boat | Torpedo | Deck gun | Notes |
@@ -207,11 +243,14 @@ scripts/
   data.gd                  navies, boats, aircraft, targets and ship layouts
   util.gd                  bearing and aiming helpers
   sim/world.gd             the simulation: no rendering, fully testable
+  sim/modern_world.gd      the near-future war: towed arrays, Mk 48s, decoys, their hunters
+  sim/sim.gd               picks the wartime or near-future simulation for a boat
   sim/damage.gd            warship flooding, stability, fires, magazines and machinery
   sim/ballistics.gd        shell flight with air drag, and armour penetration
   build/                   procedural models and paint: warships, your boat, aircraft, crew, islands
   view/                    ocean, wake map, sky, effects, graphics settings and the 3D world
-  interior/                walkable eight-compartment interior, its textures and props, the player
+  interior/                walkable eight-compartment interior, the near-future control room,
+                           their textures and props, the player
   deck/                    walkable deck, bridge and hatches; lookouts and gun crew
   ui/                      HUD, sights, live instruments, menus
   audio/sfx.gd             procedurally synthesised sound

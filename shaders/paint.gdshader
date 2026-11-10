@@ -29,6 +29,7 @@ uniform float rough = 0.78;
 uniform float metal = 0.0;
 uniform float scale = 1.0;     // camouflage pattern size
 uniform float band = 2.0;      // height of the grimy band above the waterline
+uniform float tile = 0.0;      // anechoic tile size (m) on modern submarines; 0 for plating
 
 #include "res://shaders/clip.gdshaderinc"
 
@@ -167,7 +168,26 @@ void fragment() {
 
 	float rs = 0.0;   // how much rust shows here
 	float dirt = 0.0; // how much grime
-	if (part == 0) {
+	if (part == 0 && tile > 0.0) {
+		// Anechoic tiles: a fine grid of rubber tiles, each a slightly different
+		// black, with the odd replacement or missing tile.
+		vec2 tu = an.y > an.x ? vec2(p.z, p.x) : vec2(p.z, p.y);
+		vec2 g = tu / tile;
+		vec2 cell = floor(g);
+		vec2 f = fract(g);
+		float fpx = fwidth(g.x);
+		float lines_k = 1.0 - smoothstep(0.15, 0.6, fpx);
+		float seam = max(1.0 - smoothstep(0.0, 0.03 + fpx, min(f.x, 1.0 - f.x)),
+			1.0 - smoothstep(0.0, 0.03 + fpx, min(f.y, 1.0 - f.y)));
+		float id = hash2(cell + seed);
+		col *= mix(1.0, 0.85 + 0.3 * id, lines_k);
+		col *= 1.0 - 0.35 * seam * lines_k;
+		float odd = step(0.988, hash2(cell * 1.7 + 3.0));
+		col = mix(col, col * 1.45 + vec3(0.006), odd * lines_k);
+		float gone = step(0.997, hash2(cell * 2.3 + 11.0));
+		col = mix(col, vec3(0.075, 0.08, 0.08), gone * lines_k);
+		dirt = max(dirt, smoothstep(band, band * 0.3, p.y) * 0.4);
+	} else if (part == 0) {
 		// Plating: strakes every 2.4 m and staggered butts every 9 m, faded out with distance.
 		float lines_k = 1.0 - smoothstep(0.05, 0.25, fw);
 		float sy = abs(fract(p.y / 2.4) - 0.5) * 2.4;

@@ -73,6 +73,7 @@ class Sub:
 	var aa_reload := 0.0
 	var sys := {}
 	var grounded := false
+	var decoys := 0           # near-future boats: decoys left to launch
 	var pitch := 0.0          # hull angle, degrees, + = bow up
 	var vz := 0.0             # vertical speed, m/s, + = going deeper
 	var ballast := 0.0        # variable ballast, m/s it adds to vz (+ = flooded, heavy)
@@ -268,7 +269,8 @@ func _init(nation: Dictionary, target_spec: Dictionary, is_demo := false) -> voi
 	for i in nat["tubes"]:
 		sub.tubes.append(0.0)
 	sub.spares = int(nat["torps"]) - int(nat["tubes"])
-	sub.gun_ammo = int(nat["gun"]["ammo"])
+	sub.gun_ammo = int((nat["gun"] as Dictionary).get("ammo", 0))
+	sub.decoys = int(nat.get("decoys", 0))
 	for k in SYSTEMS:
 		sub.sys[k] = 100.0
 	var test := float(nat["test"])
@@ -279,11 +281,15 @@ func _init(nation: Dictionary, target_spec: Dictionary, is_demo := false) -> voi
 	_spawn()
 	_make_islands(spec.get("terrain", "open"))
 	if not demo:
-		report("Conn: patrol station reached. Hunting %s." % target.name, "good")
-		report("Sonar: listening. Raise the scope and find her.")
-		if nat.get("bt", false):
-			report("Bathythermograph shows a thermal layer near %d metres." % int(layer_depth))
+		_opening()
 	_observe(0.0)
+
+
+func _opening() -> void:
+	report("Conn: patrol station reached. Hunting %s." % target.name, "good")
+	report("Sonar: listening. Raise the scope and find her.")
+	if nat.get("bt", false):
+		report("Bathythermograph shows a thermal layer near %d metres." % int(layer_depth))
 
 
 func _new_id() -> int:
@@ -662,8 +668,8 @@ func fire(n := 1, view_brg := -1.0) -> void:
 	if result != "" or demo:
 		return
 	var s := sub
-	if s.depth > FIRE_MAX:
-		report("Too deep to fire. Come above %d metres." % int(FIRE_MAX), "warn")
+	if s.depth > fire_max():
+		report("Too deep to fire. Come above %d metres." % int(fire_max()), "warn")
 		return
 	if s.sys["tubes"] <= 25.0:
 		report("Torpedo room: the tubes are damaged, we can't fire!", "warn")
@@ -712,6 +718,42 @@ func fire(n := 1, view_brg := -1.0) -> void:
 		report("TDC: target is beyond torpedo range. It may run dry.", "warn")
 
 
+## How strong a heard ship's strobe is on the sonar screen, 0 to 1.
+func strobe(sh: Ship) -> float:
+	var r := sub.pos.distance_to(sh.pos)
+	return clampf((0.35 + sh.spd / 14.0) * (4000.0 / (r + 1500.0)), 0.08, 1.0) * (0.3 + 0.7 * sub.sys["hydrophones"] / 100.0)
+
+
+## Torpedoes coming for us that sonar can hear (near-future only).
+func threats() -> Array:
+	return []
+
+
+## Fire control's estimate of the locked target: [position, velocity, error
+## radius in metres]; empty when there is none (near-future only).
+func fire_control_estimate() -> Array:
+	return []
+
+
+## Near-future boats only: cut the guidance wires, launch a decoy, lock the
+## strongest sonar contact. ModernWorld overrides these.
+func cut_wires() -> void:
+	pass
+
+
+func launch_decoy() -> void:
+	pass
+
+
+func lock_sonar() -> void:
+	report("Locking needs the periscope or the binoculars on deck.", "warn")
+
+
+## Deepest the tubes can fire from.
+func fire_max() -> float:
+	return float(nat.get("fire_max", FIRE_MAX))
+
+
 ## Deck gun mount position in sim 3D space.
 func gun_pos() -> Vector3:
 	var L: float = nat["sub"]["len"]
@@ -722,6 +764,8 @@ func gun_pos() -> Vector3:
 
 func gun_ready() -> String:
 	var s := sub
+	if (nat["gun"] as Dictionary).is_empty():
+		return "none"
 	if not s.surfaced():
 		return "submerged"
 	if s.crew_ready > 0.0:
@@ -745,7 +789,7 @@ func fire_gun() -> void:
 	var s := sub
 	var st := gun_ready()
 	if st != "ready":
-		if st == "loading":
+		if st == "loading" or st == "none":
 			return
 		report("Gun crew: %s." % {"submerged": "we're submerged", "manning": "still manning the gun",
 			"damaged": "the gun is damaged", "no ammo": "out of ammunition"}[st], "warn", "gunwarn", 2.0)
@@ -776,7 +820,7 @@ func fire_gun() -> void:
 
 func fire_aa(dir3: Vector3) -> void:
 	var s := sub
-	if not s.surfaced() or s.crew_ready > 0.0 or s.aa_reload > 0.0:
+	if (nat["aa"] as Dictionary).is_empty() or not s.surfaced() or s.crew_ready > 0.0 or s.aa_reload > 0.0:
 		return
 	var a: Dictionary = nat["aa"]
 	var L: float = nat["sub"]["len"]
@@ -918,8 +962,11 @@ func _update_sub(dt: float) -> void:
 		s.scope_up = false
 		report("Scope lowered, we're going under.")
 
-	# Battery and air.
-	if surf_trim:
+	# Battery and air. A nuclear boat has neither to worry about.
+	if N.get("nuclear", false):
+		s.bat = 100.0
+		s.air = 100.0
+	elif surf_trim:
 		var frac := absf(s.spd) / float(N["surf_kn"])
 		s.bat = minf(100.0, s.bat + 0.14 * dt * (1.0 - 0.6 * frac) * diesels / 100.0)
 		s.air = minf(100.0, s.air + 1.0 * dt)
@@ -1997,7 +2044,7 @@ func _check_end() -> void:
 		report("We're breaking up! All hands...", "alarm")
 		sound("breakup", 1.0)
 		_end("lost", 3.0)
-	elif tg.alive() and s.pos.distance_to(tg.pos) > ESCAPE:
+	elif tg.alive() and s.pos.distance_to(tg.pos) > float(nat.get("escape", ESCAPE)):
 		report("Sonar: lost %s's screws. She got away." % tg.short, "warn")
 		_end("escaped", 2.5)
 	elif tg.alive() and torps.is_empty():

@@ -27,15 +27,18 @@ const BELT := {"yamato": 410.0, "kongo": 203.0, "tirpitz": 320.0, "royaloak": 33
 	"wasp": 16.0, "courageous": 76.0, "arkroyal": 114.0, "indianapolis": 102.0, "ashigara": 102.0,
 	"prinz": 80.0, "juneau": 95.0, "kuma": 63.0, "karlsruhe": 50.0}
 ## How well each navy's damage control worked (patching, pumping, counterflooding, firefighting).
-const DC := {"us": 1.0, "uk": 0.9, "de": 0.85, "jp": 0.6}
+const DC := {"us": 1.0, "uk": 0.9, "de": 0.85, "jp": 0.6, "cn": 0.8}
 ## How much of a torpedo's blast gets past the underwater protection.
-const PROT := {"bb": 0.7, "cv": 0.85, "ca": 1.0, "cl": 1.0, "dd": 1.3, "pc": 1.5}
+const PROT := {"bb": 0.7, "cv": 0.85, "ca": 1.0, "cl": 1.0, "dd": 1.3, "pc": 1.5, "cg": 1.1, "ddg": 1.15, "ffg": 1.25}
 ## Chance per full-power torpedo hit next to a magazine that it goes up.
-const MAG_RISK := {"bb": 0.05, "cv": 0.05, "ca": 0.1, "cl": 0.14, "dd": 0.2, "pc": 0.1}
+const MAG_RISK := {"bb": 0.05, "cv": 0.05, "ca": 0.1, "cl": 0.14, "dd": 0.2, "pc": 0.1, "cg": 0.12, "ddg": 0.14, "ffg": 0.12}
 ## How hard water on one side heels her. Battleships flood their wide side
 ## protection far off the centreline, and big carriers carry their weight
 ## high, so one-sided damage tends to roll them over before they founder.
-const HEEL := {"bb": 0.8, "cv": 0.76, "ca": 0.66, "cl": 0.62, "dd": 0.55, "pc": 0.55}
+const HEEL := {"bb": 0.8, "cv": 0.76, "ca": 0.66, "cl": 0.62, "dd": 0.55, "pc": 0.55, "cg": 0.64, "ddg": 0.62, "ffg": 0.58}
+## A heavyweight torpedo bursting under the keel lifts the hull on the gas
+## bubble and drops it into the hole: chance it breaks her back, by type.
+const KEEL_BREAK := {"pc": 0.95, "dd": 0.9, "ffg": 0.85, "ddg": 0.75, "cl": 0.6, "cg": 0.55, "ca": 0.45}
 ## Heel (degrees) past which a ship rolls over.
 const CAPSIZE := 33.0
 const FILL_S := 32.0   # seconds for a torpedo hole to fill its compartment if left alone
@@ -85,7 +88,7 @@ func setup(layout_key: String, ship_type: String, nat: String, L: float, B: floa
 	hp = maxf(hits_to_sink, 0.4)
 	var lay := GameData.layout(layout_key)
 	freeboard = float(lay.get("fb", 6.0))
-	n = {"bb": 14, "cv": 14, "ca": 12, "cl": 12, "dd": 9, "pc": 6}.get(type, 10) as int
+	n = {"bb": 14, "cv": 14, "ca": 12, "cl": 12, "dd": 9, "pc": 6, "cg": 12, "ddg": 11, "ffg": 9}.get(type, 10) as int
 	dc = DC.get(nation, 0.9) as float
 	prot = PROT.get(type, 1.0) as float
 	mag_risk = MAG_RISK.get(type, 0.1) as float
@@ -183,7 +186,7 @@ func _event(what: String, data := {}) -> void:
 
 ## A torpedo hit at u along the hull (0 bow, 1 stern) on `side` (-1 port,
 ## +1 starboard). `power` is the warhead against a 300 kg standard.
-func torpedo(u: float, side: int, power: float) -> void:
+func torpedo(u: float, side: int, power: float, keel := false) -> void:
 	if not afloat():
 		return
 	var i := _comp(u)
@@ -191,6 +194,19 @@ func torpedo(u: float, side: int, power: float) -> void:
 	var r := power * prot / FILL_S
 	holes[i * 2 + s] += r
 	limit[i * 2 + s] = 1.0
+	if keel:
+		# Under the keel: both sides of the compartment are opened up, and
+		# the whipping can break a smaller ship's back outright.
+		holes[i * 2 + (1 - s)] += r
+		limit[i * 2 + (1 - s)] = 1.0
+		structure -= 0.12 * power
+		if randf() < float(KEEL_BREAK.get(type, 0.0)) * power:
+			mode = "explode"
+			break_u = clampf(u, 0.25, 0.75)
+			structure = 0.0
+			fire[i] = minf(1.0, fire[i] + 0.5)
+			_event("broken", {"u": break_u})
+			return
 	for j in [i - 1, i + 1]:
 		if j >= 0 and j < n:
 			var cj: int = j * 2 + s

@@ -26,7 +26,10 @@ func _draw() -> void:
 	var c := sz * 0.5
 	match mode:
 		"periscope":
-			_periscope(w, c, minf(sz.x, sz.y) * 0.47)
+			if w.nat.get("nuclear", false):
+				_photonics(w, c, sz)
+			else:
+				_periscope(w, c, minf(sz.x, sz.y) * 0.47)
 		"deck":
 			if game.zoomed:
 				_binoculars(c, sz)
@@ -100,6 +103,87 @@ func _periscope(w: World, c: Vector2, r: float) -> void:
 		"ELEV %+d" % int(s.scope_elev) if absf(s.scope_elev) > 1.0 else ""], Style.TEXT])
 	_target_lines(w, lines)
 	var y := c.y + r * 0.86 - lines.size() * 20
+	for ln in lines:
+		var f := Instruments.font()
+		var wd := f.get_string_size(ln[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+		draw_rect(Rect2(Vector2(c.x - wd * 0.5 - 8, y - 11), Vector2(wd + 16, 22)), Color(0, 0, 0, 0.5))
+		Instruments.text(self, ln[0], Vector2(c.x, y), 15, ln[1], HORIZONTAL_ALIGNMENT_CENTER)
+		y += 22
+	if game.scope_wash > 0.6:
+		Instruments.text(self, "WASHED OVER", c + Vector2(0, -40), 22, Color(0.7, 0.9, 0.9), HORIZONTAL_ALIGNMENT_CENTER)
+
+
+## The near-future boats' photonics mast: a camera feed on a screen, not a
+## lens. Full frame, a thin crosshair, a bearing tape, and at night the
+## green of the thermal imager.
+func _photonics(w: World, c: Vector2, sz: Vector2) -> void:
+	var s := w.sub
+	var fov: float = game.scope_fov()
+	var view: float = game.view_brg()
+	var inset := 28.0
+	var frame := Rect2(Vector2(inset, inset + 30), sz - Vector2(inset * 2, inset * 2 + 30))
+	var ppd := frame.size.x / fov
+	if w.tod != "day":
+		draw_rect(frame, Color(0.15, 0.55, 0.3, 0.22))
+	if game.scope_wash > 0.0:
+		draw_rect(frame, Color(0.08, 0.22, 0.24, game.scope_wash * 0.85))
+	var col := Color(0.92, 0.95, 0.9, 0.85)
+	# Corners of the frame.
+	for corner in [frame.position, Vector2(frame.end.x, frame.position.y), frame.end, Vector2(frame.position.x, frame.end.y)]:
+		var cc: Vector2 = corner
+		var dx := 24.0 * (1.0 if cc.x < c.x else -1.0)
+		var dy := 24.0 * (1.0 if cc.y < c.y else -1.0)
+		draw_line(cc, cc + Vector2(dx, 0), col, 2.0)
+		draw_line(cc, cc + Vector2(0, dy), col, 2.0)
+	# Crosshair with a gap, and a horizon scale.
+	draw_line(c - Vector2(60, 0), c - Vector2(10, 0), col, 1.5)
+	draw_line(c + Vector2(10, 0), c + Vector2(60, 0), col, 1.5)
+	draw_line(c - Vector2(0, 40), c - Vector2(0, 10), col, 1.5)
+	draw_line(c + Vector2(0, 10), c + Vector2(0, 40), col, 1.5)
+	var unit := 1 if s.zoom else 2
+	var span := int(fov / 2.0) + 1
+	for d in range(-span, span + 1):
+		if d % unit != 0 or d == 0:
+			continue
+		var x := c.x + d * ppd
+		if x > frame.position.x + 30 and x < frame.end.x - 30:
+			draw_line(Vector2(x, c.y - 4), Vector2(x, c.y + 4), Color(col, 0.6), 1.0)
+	# Bearing tape along the top.
+	var ty := frame.position.y + 26
+	var stepd := 2 if s.zoom else 10
+	var dd := int(floor((view - fov / 2.0) / stepd)) * stepd
+	while dd <= view + fov / 2.0 + stepd:
+		var x := c.x + U.adiff(dd, view) * ppd
+		if x > frame.position.x + 30 and x < frame.end.x - 30:
+			draw_line(Vector2(x, ty), Vector2(x, ty + 8), col, 1.0)
+			Instruments.text(self, U.p3(dd), Vector2(x, ty - 10), 13, col, HORIZONTAL_ALIGNMENT_CENTER)
+		dd += stepd
+	draw_colored_polygon(PackedVector2Array([Vector2(c.x - 6, ty + 18), Vector2(c.x + 6, ty + 18), Vector2(c.x, ty + 10)]), Style.AMBER)
+	var cam: Camera3D = game.world_cam
+	if w.lock != null and w.lock.alive():
+		var p := Vector3(w.lock.pos.x, 10.0, -w.lock.pos.y)
+		if not cam.is_position_behind(p):
+			var sp := cam.unproject_position(p)
+			var half := clampf(w.lock.length / w.sub.pos.distance_to(w.lock.pos) * 57.3 * ppd * 0.5, 12.0, frame.size.y * 0.3)
+			_bracket(Rect2(sp - Vector2(half, half * 0.5), Vector2(half * 2, half)), Style.AMBER)
+	Instruments.text(self, "PHOTONICS MAST   %s   %s" % ["THERMAL" if w.tod != "day" else "COLOUR", "x6" if s.zoom else "x1.5"],
+		Vector2(frame.position.x + 40, frame.position.y + 54), 14, col)
+	var lines := []
+	lines.append(["TRUE %s  REL %s  %s" % [U.p3(view), U.p3(s.scope_rel), "ELEV %+d" % int(s.scope_elev) if absf(s.scope_elev) > 1.0 else ""],
+		Style.TEXT])
+	if w.lock == null or not w.lock.alive():
+		lines.append(["L or click: track a ship", Style.MUTED])
+	else:
+		var tg := w.lock
+		var sol = w.solution()
+		var q := int((sol["q"] if sol != null else 0.0) * 100.0)
+		lines.append(["TRACK %s  LASER RANGE %d m  SPD %d kn  SOLN %d%%" % [tg.short.to_upper(), int(s.pos.distance_to(tg.pos)),
+			int(round(tg.spd)), q], Style.AMBER])
+		if sol != null:
+			lines.append(["FIRING COURSE %s  RUN %.1f km  TIME %d:%02d  %s" % [U.p3(sol["hdg"]), float(sol["run"]) / 1000.0,
+				int(sol["t"]) / 60, int(sol["t"]) % 60, "READY" if sol["in_range"] else "OUT OF RANGE"],
+				Style.GOOD if sol["in_range"] else Style.ALARM])
+	var y := frame.end.y - 18 - (lines.size() - 1) * 22
 	for ln in lines:
 		var f := Instruments.font()
 		var wd := f.get_string_size(ln[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x

@@ -1,5 +1,6 @@
 extends CanvasLayer
-## Main menu: pick a navy, pick a famous warship, read the orders, sail.
+## Main menu: pick the war (1939-45 or the near future), a navy or boat, a
+## target, read the orders, sail.
 
 const GameData := preload("res://scripts/data.gd")
 const Style := preload("res://scripts/ui/style.gd")
@@ -10,6 +11,7 @@ var body: VBoxContainer
 var nat_id := ""
 var tgt_id := ""
 var step := "nation"
+var era := "ww2"
 
 
 func build(g) -> void:
@@ -35,7 +37,7 @@ func build(g) -> void:
 	v.add_theme_constant_override("separation", 6)
 	panel.add_child(v)
 	v.add_child(Style.label(Style.spaced("SILENT BEARING"), 48, Style.BRASS))
-	v.add_child(Style.label("Take the conn of a wartime submarine. Find the warship, slip the escorts and the aircraft, and sink her.", 17, Style.TEXT))
+	v.add_child(Style.label("Take the conn of a submarine. Find the warship, slip the escorts and the aircraft, and sink her.", 17, Style.TEXT))
 	var sep := HSeparator.new()
 	sep.add_theme_constant_override("separation", 14)
 	v.add_child(sep)
@@ -59,15 +61,38 @@ func show_step(s: String) -> void:
 			_brief()
 
 
+func _order() -> Array:
+	return GameData.MODERN_ORDER if era == "modern" else GameData.NATION_ORDER
+
+
+func _set_era(e: String) -> void:
+	era = e
+	show_step("nation")
+
+
 func _nations() -> void:
-	body.add_child(Style.label(Style.spaced("CHOOSE YOUR NAVY"), 14, Style.MUTED))
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 10)
+	for e in [["ww2", "WORLD WAR II, 1939-45"], ["modern", "NEAR FUTURE: WESTERN PACIFIC"]]:
+		var b := Style.button(e[1], func(): _set_era(e[0]), 15, era == e[0])
+		tabs.add_child(b)
+	var hint := Style.label("Tab switches", 13, Style.MUTED)
+	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	tabs.add_child(hint)
+	body.add_child(tabs)
+	if era == "modern":
+		body.add_child(Style.label("A fictional war at sea in the 2030s. Nuclear boats, wire-guided torpedoes, and a screen that hunts you with sonar and helicopters.", 14, Style.TEXT, true))
+	body.add_child(Style.label(Style.spaced("CHOOSE YOUR BOAT" if era == "modern" else "CHOOSE YOUR NAVY"), 14, Style.MUTED))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
 	body.add_child(row)
 	var nations := GameData.nations()
-	for i in GameData.NATION_ORDER.size():
-		var nid: String = GameData.NATION_ORDER[i]
+	var order := _order()
+	for i in order.size():
+		var nid: String = order[i]
 		var nat: Dictionary = nations[nid]
+		var modern := GameData.is_modern(nat)
 		var card := Button.new()
 		card.custom_minimum_size = Vector2(250, 520)
 		card.pressed.connect(func(): _pick_nation(nid))
@@ -83,7 +108,7 @@ func _nations() -> void:
 		card.add_child(cv)
 		var bc := CenterContainer.new()
 		bc.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var bd := Style.badge(nid)
+		var bd := Style.badge(String(nat.get("navy", nid)))
 		bd.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		bc.add_child(bd)
 		cv.add_child(bc)
@@ -96,10 +121,16 @@ func _nations() -> void:
 		var g := GridContainer.new()
 		g.columns = 2
 		g.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		for kv in [["Submerged", "%s kn" % str(nat["sub_kn"])], ["Surfaced", "%s kn" % str(nat["surf_kn"])], ["Test depth", "%d m" % int(nat["test"])],
+		var rows := [["Submerged", "%s kn" % str(nat["sub_kn"])], ["Surfaced", "%s kn" % str(nat["surf_kn"])], ["Test depth", "%d m" % int(nat["test"])],
 				["Dive time", "%d s" % int(nat["dive_time"])], ["Tubes / load", "%d / %d" % [nat["tubes"], nat["torps"]]],
 				["Torpedo", nat["torp"]["name"]], ["Run", "%.1f km, %d kn" % [float(nat["torp"]["range"]) / 1000.0, int(nat["torp"]["kn"])]],
-				["Wake", "visible" if nat["torp"]["wake"] else "none"], ["Deck gun", nat["gun"]["name"]]]:
+				["Wake", "visible" if nat["torp"]["wake"] else "none"], ["Deck gun", (nat["gun"] as Dictionary).get("name", "none")]]
+		if modern:
+			rows = [["Submerged", "%s kn" % str(nat["sub_kn"])], ["Test depth", "%d m" % int(nat["test"])], ["Power", "nuclear"],
+				["Tubes / load", "%d / %d" % [nat["tubes"], nat["torps"]]], ["Torpedo", nat["torp"]["name"]],
+				["Run", "%d km, %d kn" % [int(float(nat["torp"]["range"]) / 1000.0), int(nat["torp"]["kn"])]],
+				["Guidance", "wire, then homing"], ["Decoys", str(nat.get("decoys", 0))]]
+		for kv in rows:
 			var k := Style.label(kv[0], 13, Style.MUTED)
 			k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			g.add_child(k)
@@ -126,9 +157,10 @@ func _pick_nation(nid: String) -> void:
 
 func _targets() -> void:
 	var nat: Dictionary = GameData.nations()[nat_id]
+	var modern := GameData.is_modern(nat)
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 12)
-	var bd := Style.badge(nat_id)
+	var bd := Style.badge(String(nat.get("navy", nat_id)))
 	bd.custom_minimum_size = Vector2(36, 36)
 	head.add_child(bd)
 	head.add_child(Style.label("%s.   %s" % [nat["boat"], Style.spaced("CHOOSE YOUR TARGET")], 16, Style.TEXT))
@@ -162,7 +194,10 @@ func _targets() -> void:
 		top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		top.add_theme_constant_override("separation", 12)
 		top.add_child(Style.label(GameData.PREFIX[tg["nation"]] + tg["name"], 22, Style.TEXT))
-		top.add_child(Style.label("HISTORICAL" if tg["historical"] else "WHAT IF", 12, Style.GOOD if tg["historical"] else Style.AMBER))
+		if modern:
+			top.add_child(Style.label("SCENARIO", 12, Style.AMBER))
+		else:
+			top.add_child(Style.label("HISTORICAL" if tg["historical"] else "WHAT IF", 12, Style.GOOD if tg["historical"] else Style.AMBER))
 		top.add_child(Style.label(tg["credit"], 14, Style.BRASS))
 		v.add_child(top)
 		var note := Style.label(tg["note"], 13, Style.TEXT, true)
@@ -173,9 +208,13 @@ func _targets() -> void:
 		info.columns = 2
 		info.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		info.custom_minimum_size = Vector2(220, 0)
-		for kv in [["Type", GameData.TYPE_NAMES[tg["type"]]], ["Escorts", "%d DD, %d small" % [tg["escorts"], tg["chasers"]]],
+		var rows := [["Type", GameData.TYPE_NAMES[tg["type"]]], ["Escorts", "%d DD, %d small" % [tg["escorts"], tg["chasers"]]],
 				["Aircraft", "none" if tg["air"].is_empty() or tg["tod"] == "night" else str(tg["air"].size())],
-				["Conditions", tg["tod"].capitalize()], ["Hits to sink", str(tg["hp"])]]:
+				["Conditions", tg["tod"].capitalize()], ["Hits to sink", str(tg["hp"])]]
+		if modern:
+			rows = [["Type", GameData.TYPE_NAMES[tg["type"]]], ["Screen", "%d warships" % tg.get("group", []).size()],
+				["Helicopters", str(tg["air"].size())], ["Conditions", tg["tod"].capitalize()], ["Mk 48 hits", str(tg["hp"])]]
+		for kv in rows:
 			info.add_child(Style.label(kv[0], 12, Style.MUTED))
 			info.add_child(Style.label(kv[1], 12, Style.TEXT))
 		hb.add_child(info)
@@ -188,6 +227,7 @@ func _pick_target(tid: String) -> void:
 
 func _brief() -> void:
 	var nat: Dictionary = GameData.nations()[nat_id]
+	var modern := GameData.is_modern(nat)
 	var tg: Dictionary = {}
 	for t in nat["targets"]:
 		if t["id"] == tgt_id:
@@ -210,21 +250,35 @@ func _brief() -> void:
 	g.columns = 2
 	g.add_theme_constant_override("h_separation", 20)
 	var air := "none"
-	if not tg["air"].is_empty() and tg["tod"] != "night":
+	if not tg["air"].is_empty() and (tg["tod"] != "night" or modern):
 		var names := []
 		for a in tg["air"]:
 			names.append(GameData.AIRCRAFT[a]["name"])
 		air = ", ".join(names)
-	for kv in [["Your boat", "%s, %d %s torpedoes" % [nat["boat"], nat["torps"], nat["torp"]["name"]]],
+	var rows := [["Your boat", "%s, %d %s torpedoes" % [nat["boat"], nat["torps"], nat["torp"]["name"]]],
 			["Conditions", tg["tod"].capitalize() + (", red lighting below" if tg["tod"] == "night" else "")],
 			["Target", ("at anchor" if tg["kn"] == 0 else "about %d knots" % int(tg["kn"])) + (", zigzagging" if tg["zig"] else "")],
 			["Screen", "%d destroyers, %d sub-chasers" % [tg["escorts"], tg["chasers"]]], ["Air cover", air],
 			["Draft", "about %d m: set torpedoes shallower than that" % int(tg["draft"])],
-			["To sink her", "about %d torpedo hits, fewer all down one side" % tg["hp"]]]:
+			["To sink her", "about %d torpedo hits, fewer all down one side" % tg["hp"]]]
+	if modern:
+		var screen := []
+		for e in tg.get("group", []):
+			screen.append("%s (%s)" % [e["name"], GameData.TYPE_NAMES[e["type"]].to_lower()])
+		rows = [["Your boat", "%s, %d %ss, %d decoys" % [nat["boat"], nat["torps"], nat["torp"]["name"], nat.get("decoys", 0)]],
+			["Conditions", tg["tod"].capitalize()],
+			["Target", "about %d knots, zigzagging" % int(float(tg["kn"]) * 0.7)],
+			["Screen", ", ".join(screen)], ["Helicopters", air],
+			["Weapons", "Mk 48s run out on the wire, then home on what they hear and burst under her keel"],
+			["To sink her", "about %d Mk 48 hits" % tg["hp"]]]
+	for kv in rows:
 		g.add_child(Style.label(kv[0], 14, Style.MUTED))
 		g.add_child(Style.label(kv[1], 14, Style.TEXT))
 	left.add_child(g)
-	var tip := Style.label("Approach at periscope depth and keep the scope up only in short looks. Lock her on the TDC and let the solution settle. Fire from 1,000 to 2,500 metres off her beam. When escorts turn on you, go deep, slow down and change course. Planes spot surfaced boats from far away: dive when the lookouts call them.", 14, Style.MUTED, true)
+	var tip_text := "Approach at periscope depth and keep the scope up only in short looks. Lock her on the TDC and let the solution settle. Fire from 1,000 to 2,500 metres off her beam. When escorts turn on you, go deep, slow down and change course. Planes spot surfaced boats from far away: dive when the lookouts call them."
+	if modern:
+		tip_text = "Close in deep and slow: under about 10 knots the escorts' sonar can barely hear you. Listen on the towed array, lock her on sonar (L) and change course now and then so fire control can work out her range. A short look through the photonics mast firms it up, but their radars may see it. Fire from 8 to 20 km and keep the wire on. When a torpedo comes for you: launch decoys (N), turn away, run deep across the layer, then slow down and creep off."
+	var tip := Style.label(tip_text, 14, Style.MUTED, true)
 	tip.custom_minimum_size = Vector2(520, 0)
 	left.add_child(tip)
 	var right := VBoxContainer.new()
@@ -234,7 +288,7 @@ func _brief() -> void:
 	var cg := GridContainer.new()
 	cg.columns = 2
 	cg.add_theme_constant_override("h_separation", 16)
-	for row in GameData.HELP:
+	for row in (GameData.HELP_MODERN if modern else GameData.HELP):
 		cg.add_child(Style.label(row[0], 13, Style.AMBER))
 		cg.add_child(Style.label(row[1], 13, Style.TEXT))
 	right.add_child(cg)
@@ -249,12 +303,15 @@ func _brief() -> void:
 func key(k: int) -> void:
 	if k >= KEY_1 and k <= KEY_9:
 		var i := k - KEY_1
-		if step == "nation" and i < GameData.NATION_ORDER.size():
-			_pick_nation(GameData.NATION_ORDER[i])
+		if step == "nation" and i < _order().size():
+			_pick_nation(_order()[i])
 		elif step == "target":
 			var ts: Array = GameData.nations()[nat_id]["targets"]
 			if i < ts.size():
 				_pick_target(ts[i]["id"])
+	elif k == KEY_TAB:
+		if step == "nation":
+			_set_era("ww2" if era == "modern" else "modern")
 	elif k == KEY_ENTER or k == KEY_KP_ENTER:
 		if step == "brief":
 			game.start_mission(nat_id, tgt_id)

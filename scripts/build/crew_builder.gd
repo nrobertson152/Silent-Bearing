@@ -22,6 +22,11 @@ static func outfit(nation: String, i: int) -> Dictionary:
 			shirt = [Color(0.55, 0.64, 0.75), Color(0.86, 0.86, 0.82), Color(0.50, 0.58, 0.70), Color(0.42, 0.44, 0.40)][i % 4]
 			trousers = Color(0.16, 0.20, 0.30)
 			cap = ["dixie", "none", "ball", "none"][i % 4]
+		"us_ssn", "us_ssgn", "us_ssbn":
+			# Navy blue coveralls, a ball cap here and there.
+			shirt = [Color(0.15, 0.19, 0.29), Color(0.13, 0.17, 0.26), Color(0.17, 0.21, 0.31), Color(0.30, 0.33, 0.36)][i % 4]
+			trousers = shirt.darkened(0.08)
+			cap = ["ball", "none", "none", "ball"][i % 4]
 		"uk":
 			shirt = [Color(0.85, 0.83, 0.75), Color(0.16, 0.18, 0.26), Color(0.30, 0.30, 0.28), Color(0.62, 0.60, 0.52)][i % 4]
 			trousers = Color(0.14, 0.15, 0.20)

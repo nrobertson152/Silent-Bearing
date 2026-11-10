@@ -1,5 +1,6 @@
 ## Aircraft models: fuselage or flying-boat hull, tapered wings, tail,
-## engine nacelles with spinning propellers, floats and national markings.
+## engine nacelles with spinning propellers, floats and national markings;
+## and for the near future, carrier jets and anti-submarine helicopters.
 ## Model space: nose toward -Z, right wing +X.
 
 const MeshKit := preload("res://scripts/build/mesh_kit.gd")
@@ -10,6 +11,8 @@ static func materials(nation: String) -> Dictionary:
 	match nation:
 		"jp":
 			body = Color(0.30, 0.37, 0.27)
+		"cn":
+			body = Color(0.55, 0.58, 0.6)
 		"uk":
 			body = Color(0.42, 0.43, 0.38)
 		"de":
@@ -29,6 +32,8 @@ static func materials(nation: String) -> Dictionary:
 
 
 static func build(info: Dictionary, nation: String) -> Node3D:
+	if info["kind"] == "helo":
+		return _helo(info, nation)
 	var mats := materials(nation)
 	var root := Node3D.new()
 	var k := MeshKit.new(mats)
@@ -62,6 +67,9 @@ static func add_simple(k: MeshKit, xf: Transform3D, kind: String, span: float, l
 
 
 static func _parts(k: MeshKit, xf: Transform3D, kind: String, span: float, length: float, mat: String, engines: int) -> Array:
+	if kind == "jet":
+		_jet(k, xf, span, length, mat)
+		return []
 	var props := []
 	var r := length * 0.06
 	var nose := -length * 0.45
@@ -139,6 +147,97 @@ static func _parts(k: MeshKit, xf: Transform3D, kind: String, span: float, lengt
 			k.cyl(mat, xf * Vector3(fx, wing_y - 3.0, wing_z - 1.2), xf * Vector3(fx, wing_y - 3.0, wing_z + 1.5), 0.45, 0.3, 8)
 			k.cyl("black", xf * Vector3(fx, wing_y - 2.8, wing_z), xf * Vector3(fx, wing_y, wing_z), 0.06, 0.06, 4, false)
 	return props
+
+
+## A carrier fighter parked with its wings folded: slim fuselage, chined
+## nose, swept wings, twin fins and stabilators.
+static func _jet(k: MeshKit, xf: Transform3D, span: float, length: float, mat: String) -> void:
+	var r := length * 0.045
+	var nose := -length * 0.5
+	var tail := length * 0.5
+	k.cyl(mat, xf * Vector3(0, 0, nose), xf * Vector3(0, 0, nose + length * 0.18), 0.05, r * 0.85, 10)
+	k.cyl(mat, xf * Vector3(0, 0, nose + length * 0.18), xf * Vector3(0, 0, tail - 1.0), r * 0.85, r * 1.1, 10)
+	k.cyl("black", xf * Vector3(0, 0, tail - 1.0), xf * Vector3(0, 0, tail), r * 0.9, r * 0.8, 10)
+	k.box("glass", xf * Vector3(0, r * 0.75, nose + length * 0.22), Vector3(r * 0.8, r * 0.6, length * 0.12), xf.basis)
+	# Folded wings: the inner panels only, with the tips standing up.
+	var wz := nose + length * 0.55
+	var wi := span * 0.28
+	for sd in [-1.0, 1.0]:
+		var s: float = sd
+		k.hexa(mat, _x(xf, [Vector3(s * r, 0, wz - length * 0.12), Vector3(s * wi, 0, wz), Vector3(s * wi, 0, wz + length * 0.12),
+			Vector3(s * r, 0, wz + length * 0.16), Vector3(s * r, 0.15, wz - length * 0.12), Vector3(s * wi, 0.15, wz),
+			Vector3(s * wi, 0.15, wz + length * 0.12), Vector3(s * r, 0.15, wz + length * 0.16)]))
+		k.box(mat, xf * Vector3(s * wi, span * 0.1, wz + length * 0.06), Vector3(0.15, span * 0.2, length * 0.11), xf.basis)
+		# Fins and stabilators.
+		k.box(mat, xf * Vector3(s * r * 0.9, r + length * 0.06, tail - length * 0.1), Vector3(0.12, length * 0.13, length * 0.13),
+			xf.basis * Basis(Vector3(0, 0, 1), s * 0.25))
+		k.box(mat, xf * Vector3(s * (r + span * 0.08), 0, tail - length * 0.06), Vector3(span * 0.16, 0.12, length * 0.1), xf.basis)
+
+
+## An anti-submarine helicopter: cabin, tail boom and fin, wheels, a sonar
+## and torpedo station, and rotors on their own nodes so they can turn.
+static func _helo(info: Dictionary, nation: String) -> Node3D:
+	var mats := materials(nation)
+	var root := Node3D.new()
+	var k := MeshKit.new(mats)
+	var span: float = info["span"]
+	var length: float = info["len"]
+	var cab := length * 0.42
+	var w := 2.3
+	var h := 2.2
+	# Cabin: a rounded box with a sloped nose and glazing.
+	k.block("plane", 0, -length * 0.12, -h * 0.5, h * 0.5, w, cab, w * 0.9, cab * 0.92, -0.2)
+	k.block("glass", 0, -length * 0.12 - cab * 0.5 - 0.6, -h * 0.25, h * 0.35, w * 0.86, 1.4, w * 0.7, 0.4, 0.4)
+	k.block("plane", 0, -length * 0.06, h * 0.5, h * 0.5 + 0.8, w * 0.7, cab * 0.55, w * 0.6, cab * 0.45)
+	# Tail boom, fin and stabilizer.
+	k.cyl("plane", Vector3(0, h * 0.2, length * 0.08), Vector3(0, h * 0.45, length * 0.5), 0.75, 0.35, 10)
+	k.block("plane", 0, length * 0.52, h * 0.3, h * 0.3 + 2.4, 0.3, 1.8, 0.25, 1.2, 0.5)
+	k.box("plane", Vector3(0.6, h * 0.5, length * 0.48), Vector3(2.4, 0.12, 0.8))
+	# Wheels and the torpedo carried on the side.
+	for s in [-1.0, 1.0]:
+		k.cyl("black", Vector3(s * w * 0.6, -h * 0.75, -length * 0.02), Vector3(s * w * 0.66, -h * 0.75, -length * 0.02), 0.35, 0.35, 8)
+		k.cyl("white", Vector3(s * (w * 0.5 + 0.35), -h * 0.2, -length * 0.25), Vector3(s * (w * 0.5 + 0.35), -h * 0.2, -length * 0.25 + 2.6), 0.16, 0.16, 8)
+	k.cyl("black", Vector3(0, -h * 0.5, -length * 0.25), Vector3(0, -h * 0.75, -length * 0.25), 0.1, 0.1, 6)
+	_markings_helo(k, nation, w, h, length)
+	var mi := MeshInstance3D.new()
+	mi.mesh = k.commit()
+	root.add_child(mi)
+	# Main rotor: four blades on a hub, turning about the vertical.
+	var rotor := Node3D.new()
+	rotor.position = Vector3(0, h * 0.5 + 1.2, -length * 0.08)
+	var rk := MeshKit.new(mats)
+	rk.cyl("black", Vector3(0, -0.4, 0), Vector3(0, 0.25, 0), 0.35, 0.3, 8)
+	for i in 4:
+		var a := TAU * i / 4.0
+		var b := Basis(Vector3.UP, a)
+		rk.box("black", b * Vector3(span * 0.25, 0, 0), Vector3(span * 0.5, 0.08, 0.5), b)
+	var rm := MeshInstance3D.new()
+	rm.mesh = rk.commit()
+	rotor.add_child(rm)
+	root.add_child(rotor)
+	var tail_r := Node3D.new()
+	tail_r.position = Vector3(0.35, h * 0.3 + 1.6, length * 0.53)
+	var tk := MeshKit.new(mats)
+	for i in 4:
+		var b := Basis(Vector3.RIGHT, TAU * i / 4.0)
+		tk.box("black", b * Vector3(0, 0.75, 0), Vector3(0.05, 1.5, 0.25), b)
+	var tm := MeshInstance3D.new()
+	tm.mesh = tk.commit()
+	tail_r.add_child(tm)
+	root.add_child(tail_r)
+	root.set_meta("props", [])
+	root.set_meta("rotors", [rotor, tail_r])
+	return root
+
+
+static func _markings_helo(k: MeshKit, nation: String, w: float, h: float, length: float) -> void:
+	if nation != "cn":
+		return
+	# A red star roundel on each side of the tail boom.
+	for s in [-1.0, 1.0]:
+		var c := Vector3(s * 0.62, h * 0.3, length * 0.22)
+		k.cyl("red", c, c + Vector3(s * 0.03, 0, 0), 0.55, 0.55, 12)
+		k.cyl("white", c + Vector3(s * 0.035, 0, 0), c + Vector3(s * 0.05, 0, 0), 0.25, 0.25, 5)
 
 
 static func _markings(k: MeshKit, nation: String, span: float, length: float, kind: String) -> void:

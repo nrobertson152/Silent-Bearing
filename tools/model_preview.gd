@@ -58,7 +58,18 @@ func _init() -> void:
 			shots.append(["ship", l, 115.0, 11.0, 3.6])
 	if only == "" or only == "pc":
 		shots.append(["ship", "pc", 52.0, 7.0, 2.4])
-	for nid in GameData.NATION_ORDER:
+	# Near-future ships: each target and the layouts in her group.
+	var seen := {}
+	for nid in GameData.MODERN_ORDER:
+		for t in nations[nid]["targets"]:
+			var all := [[t["layout"], t["length"], t["beam"], t["draft"]]]
+			for g in t.get("group", []):
+				all.append([g["layout"], g["length"], g["beam"], g["draft"]])
+			for a in all:
+				if not seen.has(a[0]) and (only == "" or only == a[0]):
+					seen[a[0]] = true
+					shots.append(["ship", a[0], a[1], a[2], a[3]])
+	for nid in GameData.NATION_ORDER + GameData.MODERN_ORDER:
 		if only == "" or only == "sub_" + nid:
 			shots.append(["sub", nid])
 	for key in GameData.AIRCRAFT:
@@ -83,6 +94,9 @@ func _process(_d: float) -> bool:
 			"sub":
 				node = SubBuilder.build(GameData.nations()[s[1]])
 				size = float(GameData.nations()[s[1]]["sub"]["len"])
+				if GameData.is_modern(GameData.nations()[s[1]]):
+					# Lift the boat clear of the sea to see the whole hull.
+					node.position.y = 12.0
 			"plane":
 				var info: Dictionary = GameData.AIRCRAFT[s[1]]
 				node = PlaneBuilder.build(info, "us")

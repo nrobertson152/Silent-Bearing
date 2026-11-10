@@ -5,6 +5,7 @@ extends SceneTree
 ## godot --headless --path . -s tools/sink_test.gd
 
 const GameData := preload("res://scripts/data.gd")
+const Sim := preload("res://scripts/sim/sim.gd")
 const U := preload("res://scripts/util.gd")
 const World := preload("res://scripts/sim/world.gd")
 const WorldView := preload("res://scripts/view/world_view.gd")
@@ -20,9 +21,43 @@ func _process(_dt: float) -> bool:
 	for c in CASES:
 		for how in ["founder", "capsize", "magazine", "broken"]:
 			_run(c[0], c[1], how)
+	_modern_battle()
 	print("SINK %s" % ("OK" if fails == 0 else "FAIL (%d)" % fails))
 	quit(1 if fails > 0 else 0)
 	return true
+
+
+## A near-future attack with the view attached: fire Mk 48s, get hunted by
+## helicopters, rockets and torpedoes, and sink the target.
+func _modern_battle() -> void:
+	var nat: Dictionary = GameData.nations()["us_ssn"]
+	var w: World = Sim.create(nat, nat["targets"][0])
+	var tg: World.Ship = w.target
+	w.sub.pos = tg.pos + U.dirv(tg.hdg) * 9000.0 + U.dirv(tg.hdg + 90.0) * 6000.0
+	var view := WorldView.new()
+	root.add_child(view)
+	view.setup(w)
+	w.lock_ship(tg)
+	w.lock_obs = 20.0
+	w.fire(2)
+	w.launch_decoy()
+	var frames := 0
+	while frames < 2500 and w.result == "":
+		w.update(0.2)
+		if frames % 50 == 0 and w.sub.spares > 0:
+			w.lock_ship(tg)
+			w.fire(2)
+		for ev in w.events:
+			view.handle_event(ev)
+		w.events.clear()
+		view.sync(0.2, Vector3(0, 30, 600))
+		frames += 1
+	var ok := w.fired > 0
+	print("SINK %s modern battle: result '%s' after %d s, fired %d, hits %d, hull %d" % ["ok  " if ok else "FAIL", w.result, int(w.t),
+		w.fired, w.hits, int(w.sub.hull)])
+	if not ok:
+		fails += 1
+	view.queue_free()
 
 
 func _run(nid: String, tid: String, how: String) -> void:

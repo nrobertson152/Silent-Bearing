@@ -6,6 +6,7 @@
 
 const GameData := preload("res://scripts/data.gd")
 const MeshKit := preload("res://scripts/build/mesh_kit.gd")
+const ModernParts := preload("res://scripts/build/modern_parts.gd")
 const Paint := preload("res://scripts/build/paint.gd")
 const PlaneBuilder := preload("res://scripts/build/plane_builder.gd")
 
@@ -19,13 +20,15 @@ static func z_of(u: float, L: float) -> float:
 
 static func hb(lay: Dictionary, u: float, B: float) -> float:
 	var t: String = lay["hull"]
-	var fine := 0.95 if t == "bb" else (0.75 if t in ["dd", "pc"] else 0.85)
+	var modern := t in ["ddg", "ffg"]
+	var fine := 0.95 if t == "bb" else (0.75 if t in ["dd", "pc"] else (0.8 if modern else 0.85))
 	var f := 1.0
 	if u < 0.38:
 		f = pow(sin(u / 0.38 * PI * 0.5), fine)
 	elif u > 0.72:
 		var s := (u - 0.72) / 0.28
-		f = 1.0 - s * s * (0.5 if t != "pc" else 0.35)
+		# Modern hulls end in a wide transom.
+		f = 1.0 - s * s * (0.35 if t == "pc" else (0.22 if modern else 0.5))
 	return B * 0.5 * f
 
 
@@ -77,8 +80,14 @@ static func build(lay_key: String, L: float, B: float, D: float) -> Node3D:
 		_boats(k, lay, L, B)
 	if lay.has("catapult"):
 		_catapult(k, lay, lay["catapult"], L)
+	var dh := func(u: float) -> float: return deck_h(lay, u)
+	var hbf := func(u: float) -> float: return hb(lay, u, B)
 	if lay["hull"] == "cv":
-		funnel_tops.append_array(_carrier(k, lay, L, B))
+		if lay["deck"].has("angled"):
+			funnel_tops.append_array(ModernParts.carrier(k, lay, L, B, dh, hbf))
+		else:
+			funnel_tops.append_array(_carrier(k, lay, L, B))
+	funnel_tops.append_array(ModernParts.build(k, lay, L, B, dh, hbf))
 	_aa(k, lay, int(lay.get("aa", 0)), L, B)
 	var mi := MeshInstance3D.new()
 	mi.mesh = k.commit()
@@ -89,6 +98,8 @@ static func build(lay_key: String, L: float, B: float, D: float) -> Node3D:
 	var top := 30.0
 	if lay.has("tower"):
 		top = float(lay["tower"]["h"])
+	elif lay.has("imast"):
+		top = float(lay["imast"]["base"]) + float(lay["imast"]["h"]) + float(lay["fb"])
 	root.set_meta("height", top)
 	root.set_meta("beam", B)
 	root.set_meta("deck_y", float(lay["deck"]["h"]) if lay["hull"] == "cv" else float(lay["fb"]))
@@ -171,6 +182,8 @@ static func _turret(mats: Dictionary, t: Dictionary, lay: Dictionary, L: float) 
 	var k := MeshKit.new(mats)
 	var w: float = t["w"]
 	var n: int = t["n"]
+	if t.get("style", "") == "stealth":
+		return _stealth_gun(node, k, mats, t)
 	var big := w >= 6.0
 	var l := w * (1.25 if big else 1.1)
 	var h := w * (0.33 if big else 0.45)
@@ -210,6 +223,36 @@ static func _turret(mats: Dictionary, t: Dictionary, lay: Dictionary, L: float) 
 		kb.cyl("metal", Vector3(x, 0, 0.5), Vector3(x, 0, -bl * 0.25), rb * 1.5, rb * 1.25, 8)
 		kb.cyl("metal", Vector3(x, 0, -bl * 0.25), Vector3(x, 0, -bl), rb * 1.05, rb * 0.85, 8)
 		kb.cyl("metal", Vector3(x, 0, -bl + 0.4), Vector3(x, 0, -bl), rb * 1.05, rb * 1.05, 8, true, "black")
+	var bm := MeshInstance3D.new()
+	bm.mesh = kb.commit()
+	cradle.add_child(bm)
+	cradle.rotation.x = deg_to_rad(2.0)
+	return node
+
+
+## A modern single gun in a faceted, radar-scattering gunhouse.
+static func _stealth_gun(node: Node3D, k: MeshKit, mats: Dictionary, t: Dictionary) -> Node3D:
+	var w: float = t["w"]
+	var l := w * 1.25
+	var h := w * 0.42
+	k.cyl("super", Vector3(0, -float(t["lift"]) - 0.3, 0), Vector3(0, 0.3, 0), w * 0.42, w * 0.42, 16)
+	k.hexa("super", [
+		Vector3(-w * 0.18, 0.3, -l * 0.55), Vector3(w * 0.18, 0.3, -l * 0.55),
+		Vector3(w * 0.5, 0.3, l * 0.4), Vector3(-w * 0.5, 0.3, l * 0.4),
+		Vector3(-w * 0.1, 0.3 + h * 0.75, -l * 0.25), Vector3(w * 0.1, 0.3 + h * 0.75, -l * 0.25),
+		Vector3(w * 0.34, 0.3 + h, l * 0.32), Vector3(-w * 0.34, 0.3 + h, l * 0.32)])
+	var mesh := MeshInstance3D.new()
+	mesh.mesh = k.commit()
+	node.add_child(mesh)
+	var cradle := Node3D.new()
+	cradle.name = "Cradle"
+	cradle.position = Vector3(0, 0.3 + h * 0.4, -l * 0.35)
+	node.add_child(cradle)
+	var kb := MeshKit.new(mats)
+	var bl: float = t["bl"]
+	kb.cyl("super", Vector3(0, 0, 0.4), Vector3(0, 0, -bl * 0.15), 0.42, 0.34, 10)
+	kb.cyl("metal", Vector3(0, 0, -bl * 0.15), Vector3(0, 0, -bl), 0.17, 0.15, 8)
+	kb.cyl("metal", Vector3(0, 0, -bl + 0.5), Vector3(0, 0, -bl), 0.22, 0.22, 8, true, "black")
 	var bm := MeshInstance3D.new()
 	bm.mesh = kb.commit()
 	cradle.add_child(bm)
@@ -324,6 +367,11 @@ static func _funnel(k: MeshKit, lay: Dictionary, f: Dictionary, L: float, B: flo
 	var style: String = f["style"]
 	var top := base + Vector3(0, h, h * tan(rake))
 	match style:
+		"stealth":
+			# A low angular uptake with sloped sides, the exhausts in a grille.
+			top = base + Vector3(0, h, 0)
+			k.block("super", base.x, base.z, base.y - 0.2, top.y, r * 2.2, r * 3.4, r * 1.6, r * 2.8, 0.3)
+			k.box("black", top + Vector3(0, 0.05, 0.3), Vector3(r * 1.3, 0.1, r * 2.2))
 		"jp_big":
 			k.cyl("super", base, top, r * 1.05, r * 0.9, 14, false, "", 1.5)
 			k.cyl("metal", top - Vector3(0, 0.5, 0), top + Vector3(0, 0.6, 0.3), r * 0.92, r * 0.92, 14, true, "black", 1.5)
@@ -345,6 +393,17 @@ static func _funnel(k: MeshKit, lay: Dictionary, f: Dictionary, L: float, B: flo
 
 
 static func _mast(k: MeshKit, type: String, base: Vector3, h: float, yard: float) -> void:
+	if type == "lattice_modern":
+		# A tapered mast with a rotating search radar, sensor domes and a pole.
+		var y0 := base.y + 9.0
+		k.block("super", 0, base.z, base.y + 4.0, y0 + h * 0.45, 3.2, 3.6, 1.6, 1.8)
+		k.box("super", Vector3(0, y0 + h * 0.45 + 0.1, base.z), Vector3(4.2, 0.25, 3.0))
+		k.box("panel", Vector3(0, y0 + h * 0.45 + 1.2, base.z), Vector3(5.5, 1.8, 0.5))
+		for s in [-1.0, 1.0]:
+			k.sphere("metal", Vector3(s * 1.6, y0 + h * 0.3, base.z + 0.8), 0.6, 8, 5)
+		k.cyl("metal", Vector3(0, y0 + h * 0.45, base.z + 0.8), Vector3(0, y0 + h * 0.8, base.z + 0.8), 0.18, 0.1, 6)
+		k.cyl("metal", Vector3(-yard * 0.6, y0 + h * 0.62, base.z + 0.8), Vector3(yard * 0.6, y0 + h * 0.62, base.z + 0.8), 0.08, 0.08, 4, false)
+		return
 	if type == "tripod":
 		var apex := base + Vector3(0, h, 0)
 		k.cyl("super", base + Vector3(0, 0, -1.0), apex, 0.45, 0.3, 6, false)

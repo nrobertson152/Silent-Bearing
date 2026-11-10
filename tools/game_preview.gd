@@ -3,6 +3,7 @@ extends SceneTree
 ## xvfb-run godot --path . --fixed-fps 10 -s tools/game_preview.gd -- <out_dir> <nation> <target>
 
 const Game := preload("res://scripts/game.gd")
+const GameData := preload("res://scripts/data.gd")
 const U := preload("res://scripts/util.gd")
 const World := preload("res://scripts/sim/world.gd")
 
@@ -24,6 +25,10 @@ func _init() -> void:
 	root.add_child(game)
 	steps = ["menu", "targets", "brief", "start", "interior", "interior_fwd", "torpedo_room", "engine_room", "chart",
 		"periscope", "periscope_zoom", "surface", "bridge", "gun", "aa", "external", "under", "result"]
+	if GameData.is_modern(GameData.nations()[nid]):
+		# The near-future boats: one control room, no deck watch.
+		steps = ["menu_modern", "targets", "brief", "start", "interior", "interior_fwd", "sonar", "tdc", "chart",
+			"periscope", "periscope_zoom", "external", "under", "result"]
 
 
 func _snap(name: String) -> void:
@@ -42,6 +47,21 @@ func _process(_dt: float) -> bool:
 	match step:
 		"menu":
 			_snap("01_menu")
+		"menu_modern":
+			game.menu._set_era("modern")
+			wait = 2
+			steps.pop_front()
+			steps.push_front("menu")
+			return false
+		"sonar", "tdc":
+			game.open_overlay(step)
+			wait = 4
+			steps.pop_front()
+			steps.push_front(step + "_snap")
+			return false
+		"sonar_snap", "tdc_snap":
+			_snap("08_" + step.trim_suffix("_snap"))
+			game.close_overlay()
 		"targets":
 			game.menu.nat_id = nid
 			game.menu.show_step("target")
@@ -71,6 +91,12 @@ func _process(_dt: float) -> bool:
 					e.hdg = tg.hdg
 			game.world.lock_ship(tg)
 			game.world.lock_obs = 15.0
+			if game.modern:
+				game.world.sub.depth = 12.0
+				game.world.sub.dep_ord = 12.0
+				game.world.sub.scope_up = true
+				for e in game.world.ships:
+					e.heard = true
 			wait = 20
 		"interior":
 			game.player.global_position = Game.INTERIOR_ORIGIN + Vector3(0.4, 0.05, 6.0)

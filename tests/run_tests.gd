@@ -125,6 +125,7 @@ func _init() -> void:
 	_ballistics_tests()
 	_diving_tests()
 	_modern_tests()
+	_missile_tests()
 
 	print("\n%d failure(s)" % failures)
 	quit(1 if failures > 0 else 0)
@@ -320,6 +321,144 @@ func _modern_world(tid := "fujian") -> World:
 		if t["id"] == tid:
 			spec = t
 	return Sim.create(nat, spec)
+
+
+func _ssgn_world(tid := "shandong"):
+	var nat: Dictionary = GameData.nations()["us_ssgn"]
+	var spec: Dictionary = {}
+	for t in nat["targets"]:
+		if t["id"] == tid:
+			spec = t
+	return Sim.create(nat, spec)
+
+
+## Stepping a world until its missiles are all gone (or a time limit).
+func _fly_out(w, limit := 900.0) -> void:
+	var t0: float = w.t
+	while w.t - t0 < limit:
+		w.update(0.1)
+		if w.missiles_out() == 0:
+			break
+
+
+func _missile_tests() -> void:
+	seed(5150)
+	# A pair of Harpoons on a good fix find and hit a ship whose defences are down.
+	var hits := 0
+	for k in 4:
+		var w = _modern_world("nanchang")
+		w.adef.clear()
+		var tg: World.Ship = w.target
+		w.sub.pos = tg.pos + U.dirv(tg.hdg + 90.0) * 30000.0
+		w.sub.depth = 30.0
+		w.sub.dep_ord = 30.0
+		w.sub.spd = 5.0
+		w.lock_ship(tg)
+		w.lock_obs = 20.0
+		w.weapon = "harpoon"
+		w.salvo = 2
+		w.fire(3)
+		_fly_out(w)
+		if tg.hits_taken > 0:
+			hits += 1
+	check(hits >= 3, "Harpoons on a good fix find and hit an undefended ship (%d of 4)" % hits)
+	# A salvo set for time on target arrives together, however long it took to launch.
+	var wt = _ssgn_world()
+	wt.adef.clear()
+	wt.sub.depth = 20.0
+	wt.sub.dep_ord = 20.0
+	wt.sub.spd = 5.0
+	wt.lock_ship(wt.target)
+	wt.oth[wt.target.id] = {"pos": wt.target.pos, "vel": U.dirv(wt.target.hdg) * wt.target.spd * U.KN, "t": wt.t, "err": 300.0}
+	wt.weapon = "tomahawk"
+	wt.salvo = 12
+	wt.fire(3)
+	var times := []
+	var h0 := 0
+	while wt.t < 1200.0 and wt.missiles_out() > 0:
+		wt.update(0.1)
+		if wt.m_hits > h0:
+			h0 = wt.m_hits
+			times.append(wt.t)
+	var spread: float = (times.back() - times.front()) if times.size() > 1 else 999.0
+	check(wt.m_hits >= 5 and spread < 25.0,
+		"a 12-Tomahawk salvo launched over 33 s lands within %d s (%d hits, she %s)" % [int(spread), wt.m_hits,
+		"is afloat" if wt.target.alive() else "went down"])
+	# One missile against a Type 055's defences doesn't get through.
+	var downed := 0
+	for k in 5:
+		var w = _modern_world("nanchang")
+		var tg: World.Ship = w.target
+		w.sub.pos = tg.pos + U.dirv(tg.hdg + 90.0) * 40000.0
+		w.sub.depth = 30.0
+		w.sub.dep_ord = 30.0
+		w.sub.spd = 5.0
+		w.lock_ship(tg)
+		w.lock_obs = 20.0
+		w.weapon = "tomahawk"
+		w.salvo = 1
+		w.fire(1)
+		_fly_out(w)
+		if w.m_down >= 1:
+			downed += 1
+	check(downed >= 4, "a lone Tomahawk is shot down by a Type 055's group (%d of 5)" % downed)
+	# A big salvo swamps the Shandong group's air defence and wrecks her.
+	var wb = _ssgn_world()
+	wb.sub.depth = 20.0
+	wb.sub.dep_ord = 20.0
+	wb.sub.spd = 5.0
+	wb.lock_ship(wb.target)
+	wb.oth[wb.target.id] = {"pos": wb.target.pos, "vel": U.dirv(wb.target.hdg) * wb.target.spd * U.KN, "t": wb.t, "err": 400.0}
+	wb.weapon = "tomahawk"
+	wb.salvo = 80
+	wb.fire(3)
+	_fly_out(wb)
+	check(wb.m_down > 20 and wb.m_hits >= 3 and (wb.result == "disabled" or not wb.target.alive()),
+		"80 Tomahawks swamp the Shandong group: %d shot down, %d hits, result '%s'" % [wb.m_down, wb.m_hits, wb.result])
+	# The link comes in only with the mast up at periscope depth.
+	var wl = _ssgn_world()
+	wl.sub.depth = 60.0
+	wl.sub.dep_ord = 60.0
+	for i in 1500:
+		wl.update(0.2)
+	var deep_ok: bool = wl.oth.is_empty()
+	wl.sub.depth = 12.0
+	wl.sub.dep_ord = 12.0
+	wl.sub.scope_up = true
+	wl.update(0.2)
+	check(deep_ok and wl.oth.has(wl.target.id) and wl.lock == wl.target,
+		"the satellite link comes in only at periscope depth with the mast up, and tracks the carrier")
+	# Missiles climbing out of the sea near their picket give the boat away.
+	var wp = _ssgn_world()
+	var pk: World.Ship = null
+	for sh in wp.ships:
+		if sh.type == "ffg":
+			pk = sh
+	wp.sub.pos = pk.pos + U.dirv(pk.hdg) * 15000.0
+	wp.sub.depth = 20.0
+	wp.sub.dep_ord = 20.0
+	wp.sub.spd = 5.0
+	wp.lock_ship(wp.target)
+	wp.oth[wp.target.id] = {"pos": wp.target.pos, "vel": Vector2.ZERO, "t": wp.t, "err": 400.0}
+	wp.weapon = "tomahawk"
+	wp.salvo = 2
+	wp.fire(3)
+	for i in 100:
+		wp.update(0.1)
+	check(wp.datum_t > 0.0 and wp.datum.distance_to(wp.sub.pos) < 3000.0 and pk.state != "screen",
+		"a launch 15 km from their picket gives the boat away (datum %.1f km off)" % (wp.datum.distance_to(wp.sub.pos) / 1000.0))
+	# Missile hits: five wreck a carrier, two sink a frigate.
+	var cv := Damage.new()
+	cv.setup("shandong", "cv", "cn", 305.0, 38.0, 10.5, 4.0)
+	for u in [0.3, 0.45, 0.55, 0.7, 0.4]:
+		cv.missile(u, 1, 1.0)
+	var ff := Damage.new()
+	ff.setup("t054a", "ffg", "cn", 134.0, 16.0, 5.0, 1.0)
+	ff.missile(0.4, 1, 1.0)
+	ff.missile(0.6, -1, 1.0)
+	for i in 600:
+		ff.step(0.1)
+	check(cv.out_of_action() and not ff.afloat(), "five Tomahawk hits put a carrier out of action; two sink a frigate")
 
 
 func _modern_tests() -> void:

@@ -82,7 +82,7 @@ func _nations() -> void:
 	tabs.add_child(hint)
 	body.add_child(tabs)
 	if era == "modern":
-		body.add_child(Style.label("A fictional war at sea in the 2030s. Nuclear boats, wire-guided torpedoes, and a screen that hunts you with sonar and helicopters.", 14, Style.TEXT, true))
+		body.add_child(Style.label("A fictional war at sea in the 2030s. Nuclear boats with wire-guided torpedoes and cruise missiles, against a screen that hunts you with sonar and helicopters and shoots missiles down.", 14, Style.TEXT, true))
 	body.add_child(Style.label(Style.spaced("CHOOSE YOUR BOAT" if era == "modern" else "CHOOSE YOUR NAVY"), 14, Style.MUTED))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
@@ -128,8 +128,8 @@ func _nations() -> void:
 		if modern:
 			rows = [["Submerged", "%s kn" % str(nat["sub_kn"])], ["Test depth", "%d m" % int(nat["test"])], ["Power", "nuclear"],
 				["Tubes / load", "%d / %d" % [nat["tubes"], nat["torps"]]], ["Torpedo", nat["torp"]["name"]],
-				["Run", "%d km, %d kn" % [int(float(nat["torp"]["range"]) / 1000.0), int(nat["torp"]["kn"])]],
-				["Guidance", "wire, then homing"], ["Decoys", str(nat.get("decoys", 0))]]
+				["Run", "%d km, %d kn, wire" % [int(float(nat["torp"]["range"]) / 1000.0), int(nat["torp"]["kn"])]],
+				["Missiles", _missile_text(nat)], ["Decoys", str(nat.get("decoys", 0))]]
 		for kv in rows:
 			var k := Style.label(kv[0], 13, Style.MUTED)
 			k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -148,6 +148,16 @@ func _nations() -> void:
 		cv.add_child(press)
 	if game.in_patrol:
 		body.add_child(Style.button("Resume patrol", func(): game.resume(), 16))
+
+
+## "4 Harpoon, 12 Tomahawk" for a boat's missile load.
+static func _missile_text(nat: Dictionary) -> String:
+	var ms: Dictionary = nat.get("missiles", {})
+	var parts := []
+	for k in ["harpoon", "tomahawk"]:
+		if int(ms.get(k, 0)) > 0:
+			parts.append("%d %s" % [int(ms[k]), GameData.MISSILES[k]["name"]])
+	return ", ".join(parts) if not parts.is_empty() else "none"
 
 
 func _pick_nation(nid: String) -> void:
@@ -213,7 +223,10 @@ func _targets() -> void:
 				["Conditions", tg["tod"].capitalize()], ["Hits to sink", str(tg["hp"])]]
 		if modern:
 			rows = [["Type", GameData.TYPE_NAMES[tg["type"]]], ["Screen", "%d warships" % tg.get("group", []).size()],
-				["Helicopters", str(tg["air"].size())], ["Conditions", tg["tod"].capitalize()], ["Mk 48 hits", str(tg["hp"])]]
+				["Helicopters", str(tg["air"].size())], ["Conditions", tg["tod"].capitalize()],
+				["Out of action", "about 5 missile hits"] if tg.get("goal", "") == "disable" else ["Mk 48 hits", str(tg["hp"])]]
+			if tg.has("start"):
+				rows.insert(1, ["Range", "about %d km" % int(float(tg["start"][0]) / 1000.0)])
 		for kv in rows:
 			info.add_child(Style.label(kv[0], 12, Style.MUTED))
 			info.add_child(Style.label(kv[1], 12, Style.TEXT))
@@ -262,21 +275,55 @@ func _brief() -> void:
 			["Draft", "about %d m: set torpedoes shallower than that" % int(tg["draft"])],
 			["To sink her", "about %d torpedo hits, fewer all down one side" % tg["hp"]]]
 	if modern:
-		var screen := []
+		# "Yan'an (cruiser), Guiyang and Chengdu (destroyers), Yueyang (frigate)"
+		var kinds := {"cg": "cruiser", "ddg": "destroyer", "ffg": "frigate", "cv": "carrier"}
+		var by_type := {}
+		var order := []
 		for e in tg.get("group", []):
-			screen.append("%s (%s)" % [e["name"], GameData.TYPE_NAMES[e["type"]].to_lower()])
-		rows = [["Your boat", "%s, %d %ss, %d decoys" % [nat["boat"], nat["torps"], nat["torp"]["name"], nat.get("decoys", 0)]],
+			if not by_type.has(e["type"]):
+				by_type[e["type"]] = []
+				order.append(e["type"])
+			by_type[e["type"]].append(e["name"])
+		var screen := []
+		for ty in order:
+			var names: Array = by_type[ty]
+			screen.append("%s (%s%s)" % [" and ".join(names), kinds.get(ty, "warship"), "s" if names.size() > 1 else ""])
+		var helos := {}
+		for a in tg["air"]:
+			helos[a] = int(helos.get(a, 0)) + 1
+		var hl := []
+		for a in helos:
+			var nm: String = GameData.AIRCRAFT[a]["name"]
+			hl.append("a %s" % nm if int(helos[a]) == 1 else "%s %ss" % [["", "one", "two", "three", "four"][mini(int(helos[a]), 4)], nm])
+		air = ", ".join(hl) if not hl.is_empty() else "none"
+		var boat := "%s, %d %ss" % [nat["boat"], nat["torps"], nat["torp"]["name"]]
+		if (nat.get("missiles", {}) as Dictionary).size() > 0:
+			boat += ", " + _missile_text(nat)
+		rows = [["Your boat", boat + ", %d decoys" % nat.get("decoys", 0)],
 			["Conditions", tg["tod"].capitalize()],
 			["Target", "about %d knots, zigzagging" % int(float(tg["kn"]) * 0.7)],
-			["Screen", ", ".join(screen)], ["Helicopters", air],
-			["Weapons", "Mk 48s run out on the wire, then home on what they hear and burst under her keel"],
-			["To sink her", "about %d Mk 48 hits" % tg["hp"]]]
+			["Screen", ", ".join(screen)], ["Helicopters", air]]
+		if tg.has("start"):
+			rows.insert(2, ["Range", "about %d km, far beyond sonar. The satellite link gives her position." % int(float(tg["start"][0]) / 1000.0)])
+		if tg.get("goal", "") == "disable":
+			rows.append(["Weapons", "Tomahawks: a big salvo arriving together swamps their air defence. Mk 48s for close in."])
+			rows.append(["To win", "wreck her: about 5 Tomahawk hits put her out of action, or sink her with about %d Mk 48s" % tg["hp"]])
+		else:
+			var wpn := "Mk 48s run out on the wire, then home on what they hear and burst under her keel"
+			if (nat.get("missiles", {}) as Dictionary).size() > 0:
+				wpn += ". Missiles reach much farther, but a handful won't get through this screen."
+			rows.append(["Weapons", wpn])
+			rows.append(["To sink her", "about %d Mk 48 hits" % tg["hp"]])
 	for kv in rows:
 		g.add_child(Style.label(kv[0], 14, Style.MUTED))
-		g.add_child(Style.label(kv[1], 14, Style.TEXT))
+		var val := Style.label(kv[1], 14, Style.TEXT, true)
+		val.custom_minimum_size = Vector2(440, 0)
+		g.add_child(val)
 	left.add_child(g)
 	var tip_text := "Approach at periscope depth and keep the scope up only in short looks. Lock her on the TDC and let the solution settle. Fire from 1,000 to 2,500 metres off her beam. When escorts turn on you, go deep, slow down and change course. Planes spot surfaced boats from far away: dive when the lookouts call them."
-	if modern:
+	if modern and tg.has("start"):
+		tip_text = "Come up to periscope depth, raise the mast (P) and take the link: it gives the whole group's positions every few minutes. Pick Tomahawks (Q), set the salvo ([ ]) and fire (X) from above 45 m at under 10 knots. Their missiles and guns will knock down most of a small salvo; it takes around 60 arriving together to swamp them. Their picket will see the launch, so go deep and slow afterwards. Leaving the mast up lets the Tomahawks take fresher aim points."
+	elif modern:
 		tip_text = "Close in deep and slow: under about 10 knots the escorts' sonar can barely hear you. Listen on the towed array, lock her on sonar (L) and change course now and then so fire control can work out her range. A short look through the photonics mast firms it up, but their radars may see it. Fire from 8 to 20 km and keep the wire on. When a torpedo comes for you: launch decoys (N), turn away, run deep across the layer, then slow down and creep off."
 	var tip := Style.label(tip_text, 14, Style.MUTED, true)
 	tip.custom_minimum_size = Vector2(520, 0)

@@ -231,6 +231,39 @@ static func draw_chart(ci: CanvasItem, rect: Rect2, w: World, radius: float) -> 
 		if pts.size() > 1:
 			ci.draw_polyline(pts, RED_INK, 1.0)
 		ci.draw_circle(W.call(tp.pos), 3, RED_INK)
+	# Where the satellite link last put their ships, run forward.
+	var oth = w.get("oth")
+	if oth != null:
+		var link_ink := Color(0.16, 0.3, 0.55)
+		for sh in w.ships:
+			if not oth.has(sh.id) or not sh.alive():
+				continue
+			var o: Dictionary = oth[sh.id]
+			var age: float = w.t - float(o["t"])
+			var P: Vector2 = W.call((o["pos"] as Vector2) + (o["vel"] as Vector2) * age)
+			var sq := 6.0 if sh.kind == "target" else 4.0
+			ci.draw_rect(Rect2(P - Vector2(sq, sq), Vector2(sq, sq) * 2.0), link_ink, false, 1.5)
+			if sh.plot == null:
+				text(ci, sh.short, P + Vector2(9, -6), 12, link_ink)
+			if sh.kind == "target":
+				text(ci, "link -%d:%02d" % [int(age) / 60, int(age) % 60], P + Vector2(9, 8), 11, link_ink)
+	# Missiles: yours with their tracks, theirs as dots.
+	var mlist = w.get("missiles")
+	if mlist != null:
+		var green := Color(0.16, 0.47, 0.24)
+		for m in mlist:
+			if m.dead:
+				continue
+			if m.owner < 0:
+				var pts := PackedVector2Array()
+				for q in m.trail:
+					pts.append(W.call(q))
+				pts.append(W.call(m.pos))
+				if pts.size() > 1:
+					ci.draw_polyline(pts, Color(green, 0.5), 1.0)
+				ci.draw_circle(W.call(m.pos), 2.5, green)
+			else:
+				ci.draw_circle(W.call(m.pos), 1.8, RED_INK)
 	var a := deg_to_rad(s.hdg)
 	for k in range(0, 10, 2):
 		var d0 := k * 200.0 * ppm
@@ -410,42 +443,76 @@ static func draw_fire_control(ci: CanvasItem, rect: Rect2, w: World) -> void:
 	var y := rect.position.y + 30
 	var cyan := Color(0.45, 0.85, 0.9)
 	var grey := Color(0.55, 0.6, 0.62)
-	text(ci, "FIRE CONTROL   MK 48 ADCAP", Vector2(x, y), 20, cyan)
+	var dim := Color(0.4, 0.45, 0.46)
+	var ms: Dictionary = w.call("missile_status") if w.has_method("missile_status") else {}
+	var wpn: String = ms.get("weapon", "mk48")
+	text(ci, "FIRE CONTROL   %s" % String(ms.get("long", "Mk 48 ADCAP")).to_upper(), Vector2(x, y), 20, cyan)
+	if ms.get("has_missiles", false):
+		text(ci, "Q: next weapon", Vector2(rect.end.x - 24, y), 13, dim, HORIZONTAL_ALIGNMENT_RIGHT)
 	y += 34
 	var tl := w.lock
 	var sol = w.solution()
 	var est: Array = w.fire_control_estimate()
-	if tl != null and tl.alive() and not est.is_empty():
-		var r: float = s.pos.distance_to(est[0])
-		var rows := [["TRACK", tl.name], ["BEARING", U.p3(U.brg(s.pos, tl.pos))],
-			["RANGE (EST)", "%.1f km  +/- %.1f" % [r / 1000.0, float(est[2]) / 1000.0]],
-			["SOLUTION", "%d%%" % int((sol["q"] if sol != null else 0.0) * 100.0)]]
-		if sol != null:
-			rows.append(["FIRING COURSE", U.p3(sol["hdg"])])
-			rows.append(["RUN / TIME", "%.1f km / %d:%02d" % [float(sol["run"]) / 1000.0, int(sol["t"]) / 60, int(sol["t"]) % 60]])
-			rows.append(["STATUS", "IN RANGE" if sol["in_range"] else "OUT OF RANGE"])
+	var x2 := x + 210
+	if tl != null and tl.alive() and (not est.is_empty() or ms.has("aim_err")):
+		var rows := [["TRACK", tl.name], ["BEARING", U.p3(U.brg(s.pos, tl.pos))]]
+		if wpn == "mk48" and not est.is_empty():
+			var r: float = s.pos.distance_to(est[0])
+			rows.append(["RANGE (EST)", "%.1f km  +/- %.1f" % [r / 1000.0, float(est[2]) / 1000.0]])
+			rows.append(["SOLUTION", "%d%%" % int((sol["q"] if sol != null else 0.0) * 100.0)])
+			if sol != null:
+				rows.append(["FIRING COURSE", U.p3(sol["hdg"])])
+				rows.append(["RUN / TIME", "%.1f km / %d:%02d" % [float(sol["run"]) / 1000.0, int(sol["t"]) / 60, int(sol["t"]) % 60]])
+				rows.append(["STATUS", "IN RANGE" if sol["in_range"] else "OUT OF RANGE"])
+		elif ms.has("aim_err"):
+			rows.append(["RANGE (EST)", "%.1f km  +/- %.1f" % [float(ms["aim_rng"]) / 1000.0, float(ms["aim_err"]) / 1000.0]])
+			rows.append(["FLIGHT TIME", U.clock(float(ms["tof"])).substr(3)])
+			rows.append(["SALVO", "%d of %d left" % [int(ms["salvo"]), int(ms["stock"])]])
 		for row in rows:
 			text(ci, row[0], Vector2(x, y), 15, grey)
-			text(ci, str(row[1]), Vector2(x + 210, y), 16, AMBER)
+			text(ci, str(row[1]), Vector2(x2, y), 16, AMBER)
 			y += 26
 	else:
 		text(ci, "No track. Press L to track the strongest sonar contact,", Vector2(x, y), 15, grey)
 		y += 22
-		text(ci, "or lock one through the photonics mast.", Vector2(x, y), 15, grey)
+		text(ci, "lock one through the photonics mast, or take the link." if ms.get("has_missiles", false) else
+			"or lock one through the photonics mast.", Vector2(x, y), 15, grey)
 		y += 26
-	y += 14
+	if ms.get("has_missiles", false):
+		var age: float = ms.get("link_age", -1.0)
+		var link_txt := "UP, receiving" if ms.get("linked", false) else "DOWN: raise the mast at periscope depth"
+		if age >= 0.0:
+			link_txt += "   last report %s ago" % U.clock(age).substr(3)
+		text(ci, "SATELLITE LINK", Vector2(x, y), 15, grey)
+		text(ci, link_txt, Vector2(x2, y), 15, PHOS if ms.get("linked", false) else AMBER)
+		y += 26
+	y += 10
 	text(ci, "UNITS IN THE WATER", Vector2(x, y), 15, grey)
 	y += 24
 	if w.torps.is_empty():
-		text(ci, "none", Vector2(x, y), 15, Color(0.4, 0.45, 0.46))
+		text(ci, "none", Vector2(x, y), 15, dim)
 		y += 24
-	for tp in w.torps:
+	for tp in w.torps.slice(0, 4):
 		var st: String = str(tp.get("state")).to_upper()
 		var wired: bool = bool(tp.get("wire"))
 		text(ci, "UNIT %d   %-8s %-5s  run %.1f km" % [int(tp.get("unit")), st, "WIRE" if wired else "CUT", tp.run / 1000.0],
 			Vector2(x, y), 15, PHOS if st == "HOME" else AMBER)
 		y += 22
-	y += 12
+	if ms.get("has_missiles", false):
+		y += 6
+		var air := int(ms.get("air", 0))
+		var q := int(ms.get("queued", 0))
+		var line := "MISSILES IN THE AIR   %d" % air
+		if q > 0:
+			line += "   (%d still to launch)" % q
+		if air > 0:
+			line += "   %d seen by their radars" % int(ms.get("seen", 0))
+		text(ci, line, Vector2(x, y), 15, AMBER if air + q > 0 else grey)
+		y += 22
+		text(ci, "FIRED %d   HITS %d   SHOT DOWN %d" % [int(ms.get("fired", 0)), int(ms.get("hits", 0)), int(ms.get("down", 0))],
+			Vector2(x, y), 14, dim)
+		y += 24
+	y += 10
 	text(ci, "TUBES", Vector2(x, y), 15, grey)
 	y += 22
 	for i in s.tubes.size():
@@ -454,11 +521,20 @@ static func draw_fire_control(ci: CanvasItem, rect: Rect2, w: World) -> void:
 		var r := Rect2(x + i * 46, y, 40, 40)
 		ci.draw_rect(r, col)
 		if v > 0.0:
-			ci.draw_rect(Rect2(r.position + Vector2(0, 40 * (v / World.RELOAD)), Vector2(40, 40 * (1.0 - v / World.RELOAD))), Color(0.75, 0.55, 0.2))
+			ci.draw_rect(Rect2(r.position + Vector2(0, 40 * clampf(v / World.RELOAD, 0.0, 1.0)), Vector2(40, 40 * (1.0 - clampf(v / World.RELOAD, 0.0, 1.0)))),
+				Color(0.75, 0.55, 0.2))
 		text(ci, str(i + 1), r.get_center(), 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
-	text(ci, "%d Mk 48s in the racks   %d decoys" % [s.spares, s.decoys], Vector2(x + s.tubes.size() * 46 + 12, y + 20), 14, grey)
+	var racks := "%d Mk 48s in the racks   %d decoys" % [s.spares, s.decoys]
+	if w.get("harpoons") != null and int(w.get("harpoons")) > 0:
+		racks += "   %d Harpoons" % int(w.get("harpoons"))
+	if w.get("vls") != null and int(w.get("vls")) > 0:
+		racks += "   %d Tomahawks in the cells" % int(w.get("vls"))
+	text(ci, racks, Vector2(x + s.tubes.size() * 46 + 12, y + 20), 14, grey)
 	y += 60
-	text(ci, "Space: fire one   X: two, diverging   G: cut wires   N: decoy", Vector2(x, y), 13, Color(0.4, 0.45, 0.46))
+	var keys := "Space: fire one   X: two, diverging   G: cut wires   N: decoy"
+	if wpn != "mk48":
+		keys = "Space: fire one   X: salvo of %d   [ ]: salvo size   N: decoy" % int(ms.get("salvo", 1))
+	text(ci, keys, Vector2(x, y), 13, dim)
 
 
 # ------------------------------------------------------------- damage

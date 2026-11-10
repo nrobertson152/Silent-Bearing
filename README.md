@@ -13,8 +13,10 @@ submarine kills of the war, like *Shinano*, *Royal Oak*, *Ark Royal* and
 
 Or switch the menu to **Near future: Western Pacific** (Tab) for a fictional war at sea
 in the 2030s: take a Virginia-class attack boat after China's carrier *Fujian* and her
-screen, or the cruiser *Nanchang*, with wire-guided Mk 48 torpedoes, decoys and a
-screen that hunts you with sonar and helicopters.
+screen, or the cruiser *Nanchang*, with wire-guided Mk 48 torpedoes, Harpoons, Tomahawks
+and decoys, against a screen that hunts you with sonar and helicopters. Or take an
+Ohio-class guided-missile boat with 154 Tomahawks against the carrier *Shandong* and
+her air-defence screen.
 
 The original 2D pygame version is preserved at the `v1.0.0` tag.
 
@@ -157,6 +159,10 @@ she's badly hurt.
 | `F11` | Fullscreen |
 | `Esc` | Leave a station or pause |
 
+In the near-future boats `Q` picks the weapon (Mk 48, Harpoon, Tomahawk), `[` `]` set the
+missile salvo, `X` fires two Mk 48s or the salvo, `G` cuts the torpedo guidance wires and
+`N` launches a decoy. `F1` shows the full list in the game.
+
 ## What's simulated
 
 - **Your boat:** separate surface (diesel) and submerged (electric) speeds, battery
@@ -197,10 +203,12 @@ she's badly hurt.
 A fictional war in the Western Pacific. The boats, ships and weapons are modelled on
 public figures, rounded and adjusted for play.
 
-- **Your boat:** a Virginia-class attack submarine. Nuclear, so no battery or air to
-  nurse; very quiet below about 10 knots, loud above 20. No deck gun, and nobody goes
-  topside. You fight from a modern control room: ship control, the photonics mast
-  displays, the sonar stack, fire control, the digital plot and the status board.
+- **Your boats:** a Virginia-class attack submarine (22 Mk 48s, 4 Harpoons, 12
+  Tomahawks) or an Ohio-class guided-missile boat (154 Tomahawks in 22 tubes, and
+  Mk 48s). Nuclear, so no battery or air to nurse; very quiet below about 10 knots,
+  loud above 20. No deck gun, and nobody goes topside. You fight from a modern control
+  room: ship control, the photonics mast displays, the sonar stack, fire control, the
+  digital plot and the status board.
 - **Finding them:** the towed array hears a carrier group tens of kilometres away, but
   gives bearings only. Track a contact (`L`) and change course now and then: each new
   leg lets fire control work out her range. A short look through the photonics mast
@@ -217,11 +225,27 @@ public figures, rounded and adjusted for play.
   18 km by rocket. Hear a torpedo coming and you have a minute or two: launch decoys
   (`N`), put it astern, run deep across the thermal layer, then slow down and creep
   away.
+- **The satellite link:** at periscope depth with the mast up, offboard reports
+  (satellites, patrol aircraft) give the whole group's positions every few minutes,
+  far beyond sonar range. They show on the plot as blue squares.
+- **Missiles:** `Q` picks Mk 48, Harpoon or Tomahawk, `[` and `]` set the salvo, `X`
+  fires it from above 45 m at under 10 knots. A salvo leaves one missile every three
+  seconds, and each flies a dogleg so they all arrive together. They skim the sea, then
+  switch on their seekers near the aim point. Harpoons go for the biggest echo;
+  Tomahawks take fresher aim points over the link while the mast is up, and hold out
+  for the ship they were sent for.
+- **Their air defence:** radars see a sea-skimmer at about 30 km, much farther while
+  it climbs out of the sea, and a launch seen near a ship gives the boat away. Each
+  ship has long-range missiles (HHQ-9B, HHQ-9, HHQ-16), short-range HHQ-10s, close-in
+  guns and chaff, with limited fire channels and magazines. A few missiles get shot
+  down; it takes a big salvo arriving together to swamp a group. A missile hit wrecks
+  topsides and starts big fires; enough of them put a carrier out of action.
 
-| Mission | Target | Screen |
-| --- | --- | --- |
-| Fujian | Type 003 catapult carrier | Type 055 cruiser, two Type 052D destroyers, Type 054A frigate, two helicopters |
-| Nanchang | Type 055 cruiser | Type 052D destroyer, Type 054A frigate, a helicopter |
+| Boat | Mission | Target | Screen |
+| --- | --- | --- | --- |
+| Virginia | Fujian | Type 003 catapult carrier | Type 055 cruiser, two Type 052D destroyers, Type 054A frigate, two helicopters |
+| Virginia, Ohio | Nanchang | Type 055 cruiser | Type 052D destroyer, Type 054A frigate, a helicopter |
+| Ohio | Shandong | Type 002 ski-jump carrier, 50 km off | Type 055 cruiser, two Type 052D destroyers, Type 054A picket 20 km ahead, two helicopters |
 
 ## The navies
 
@@ -243,7 +267,8 @@ scripts/
   data.gd                  navies, boats, aircraft, targets and ship layouts
   util.gd                  bearing and aiming helpers
   sim/world.gd             the simulation: no rendering, fully testable
-  sim/modern_world.gd      the near-future war: towed arrays, Mk 48s, decoys, their hunters
+  sim/modern_world.gd      the near-future war: towed arrays, Mk 48s, decoys, missiles, the
+                           satellite link, their hunters and their air defence
   sim/sim.gd               picks the wartime or near-future simulation for a boat
   sim/damage.gd            warship flooding, stability, fires, magazines and machinery
   sim/ballistics.gd        shell flight with air drag, and armour penetration

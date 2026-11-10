@@ -284,6 +284,37 @@ func shell(u: float, side: int, height: float, cal: float, v: float, cos_ob: flo
 	return out
 
 
+## An anti-ship missile bursting inside her above the waterline. `power` is
+## the warhead against a 450 kg standard. It wrecks the compartment, lights
+## big fires with its own fuel, holes her near the waterline and can set off
+## missiles in their cells.
+func missile(u: float, side: int, power: float) -> void:
+	if not afloat():
+		return
+	var i := _comp(u)
+	var s := 0 if side < 0 else 1
+	structure -= 0.12 * power * prot * (400.0 / maxf(hp * 100.0, 100.0))
+	fire[i] = minf(1.0, fire[i] + 0.15 + 0.5 * power)
+	for j in [i - 1, i + 1]:
+		if j >= 0 and j < n:
+			fire[j] = minf(1.0, fire[j] + 0.15 * power)
+	var c := i * 2 + s
+	holes[c] += 0.004 * power * prot
+	limit[c] = minf(1.0, limit[c] + 0.35 * power)
+	_event("hit", {"u": u, "side": side})
+	if mach.has(i):
+		engines = maxf(0.0, engines - 0.3 * power)
+		_event("engines")
+	if mags.get(i, "") == "ready" and randf() < mag_risk * power * 1.5:
+		_explode(i)
+
+
+## Too badly hurt to fight: her topsides wrecked and burning, or no way on.
+## A carrier in this state can't fly her aircraft.
+func out_of_action() -> bool:
+	return mode != "" or structure < 0.5 or engines < 0.12 or (structure < 0.7 and burning() > 0.7)
+
+
 func _explode(i: int) -> void:
 	mags[i] = "gone"
 	mode = "explode"

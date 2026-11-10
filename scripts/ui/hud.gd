@@ -178,6 +178,7 @@ func show_result() -> void:
 		"drowned": ["LOST OVERBOARD", "%s The boat dived without you." % w.death, Style.ALARM],
 		"dry": ["OUT OF TORPEDOES", "Every tube is empty and %s is still afloat." % tg.short, Style.AMBER],
 		"disabled": ["OUT OF ACTION", "%s is burning and dead in the water. She won't fly aircraft again this war." % tg.name, Style.GOOD],
+		"launched": ["TEST FLIGHT", "The test round is on its way to the range. The deterrent has shown itself; now slip away.", Style.GOOD],
 	}
 	var modern: bool = w.nat.get("nuclear", false)
 	if modern:
@@ -233,7 +234,7 @@ func update(dt: float) -> void:
 	if w == null:
 		return
 	var s := w.sub
-	top_left.text = "%s  vs  %s" % [w.nat["boat"], w.target.name]
+	top_left.text = "%s  vs  %s" % [w.nat["boat"], w.spec.get("title", w.target.name)]
 	var dep := "SURFACED" if s.surfaced() else ("%d m (ordered %s)" % [int(s.depth), "SURFACE" if s.dep_ord <= 0.0 else "%d" % int(s.dep_ord)])
 	var power := "BAT %d%%" % int(s.bat)
 	if w.nat.get("nuclear", false):

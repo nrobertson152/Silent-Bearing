@@ -126,6 +126,7 @@ func _init() -> void:
 	_diving_tests()
 	_modern_tests()
 	_missile_tests()
+	_patrol_tests()
 
 	print("\n%d failure(s)" % failures)
 	quit(1 if failures > 0 else 0)
@@ -459,6 +460,131 @@ func _missile_tests() -> void:
 	for i in 600:
 		ff.step(0.1)
 	check(cv.out_of_action() and not ff.afloat(), "five Tomahawk hits put a carrier out of action; two sink a frigate")
+
+
+func _mission(nid: String, tid: String):
+	var nat: Dictionary = GameData.nations()[nid]
+	for t in nat["targets"]:
+		if t["id"] == tid:
+			return Sim.create(nat, t)
+	return null
+
+
+func _patrol_tests() -> void:
+	seed(9090)
+	# Below the layer and slow, an Ohio slips past a Type 093 at 4 km; fast, she's heard.
+	var quiet := 0
+	var loud := 0
+	for k in 4:
+		for fast in [false, true]:
+			var w = _mission("us_ssbn", "patrol")
+			var e: World.Ship = w.target
+			e.depth = w.layer_depth + 60.0
+			e.want_depth = e.depth
+			w.sub.depth = w.layer_depth + 70.0
+			w.sub.dep_ord = w.sub.depth
+			w.sub.spd = 18.0 if fast else 5.0
+			w.sub.tel = 6 if fast else 2
+			for i in 1500:
+				w.sub.pos = e.pos + U.dirv(e.hdg + 90.0) * 4000.0
+				w.sub.spd = 18.0 if fast else 5.0
+				w.update(0.2)
+			if w.datum_t > 0.0:
+				if fast:
+					loud += 1
+				else:
+					quiet += 1
+	check(quiet <= 1 and loud >= 3, "slow and deep an Ohio passes a Type 093 at 4 km unheard (%d of 4 heard); at 18 knots she's heard (%d of 4)" % [quiet, loud])
+	# We hear a drifting Type 093 at 5 km on the towed array.
+	var wh = _mission("us_ssbn", "patrol")
+	var h: World.Ship = wh.target
+	h.spd = 6.0
+	h.want_spd = 6.0
+	wh.sub.depth = h.depth
+	wh.sub.spd = 5.0
+	wh.sub.pos = h.pos + U.dirv(h.hdg - 90.0) * 5000.0
+	wh._observe(0.1)
+	check(h.heard, "our towed array hears a drifting Type 093 at 5 km")
+	# A Mk 48 on a firm solution runs out at her depth and hits a submerged missile boat.
+	var hits := 0
+	for k in 4:
+		var w = _mission("us_ssn", "jin")
+		var tg: World.Ship = w.target
+		w.sub.pos = tg.pos + U.dirv(tg.hdg + 90.0) * 6000.0 + U.dirv(tg.hdg) * 2000.0
+		w.sub.depth = tg.depth
+		w.sub.dep_ord = tg.depth
+		w.lock_ship(tg)
+		w.lock_obs = 20.0
+		w.fire(1)
+		for i in 3000:
+			w.update(0.2)
+			if w.hits > 0 or w.torps.is_empty():
+				break
+		if w.hits > 0:
+			hits += 1
+	check(hits >= 3, "a Mk 48 homes in depth on a submerged Type 094 and hits (%d of 4)" % hits)
+	# A Type 093 that hears us closes and fires a heavyweight.
+	var fired := 0
+	for k in 3:
+		var w = _mission("us_ssbn", "patrol")
+		var e: World.Ship = w.target
+		w.sub.depth = e.depth
+		w.sub.dep_ord = e.depth
+		for i in 1500:
+			w.sub.pos = e.pos + U.dirv(e.hdg + 90.0) * 3000.0
+			w.sub.spd = 16.0
+			w.update(0.2)
+			if not w.etorps.is_empty():
+				break
+		for tp in w.etorps:
+			if tp.kind == "yu6":
+				fired += 1
+				break
+	check(fired >= 2, "a Type 093 that hears us fires a heavyweight torpedo (%d of 3)" % fired)
+	# The patrol aircraft lays sonobuoy lines across our way.
+	var wb = _mission("us_ssbn", "patrol")
+	for i in 3000:
+		wb.update(0.2)
+	check(wb.buoys.size() >= 6, "the patrol aircraft lays sonobuoy lines (%d buoys)" % wb.buoys.size())
+	# A sonobuoy hears a fast boat passing close.
+	var heard := 0
+	for k in 3:
+		var w = _mission("us_ssbn", "patrol")
+		var b = w.Buoy.new()
+		b.id = 999
+		b.pos = w.sub.pos + Vector2(400, 0)
+		w.buoys.append(b)
+		w.sub.depth = 40.0
+		w.sub.dep_ord = 40.0
+		for i in 300:
+			w.sub.spd = 15.0
+			w.update(0.2)
+			if w.datum_t > 0.0:
+				break
+		if w.datum_t > 0.0:
+			heard += 1
+	check(heard >= 2, "a sonobuoy hears a fast boat passing close (%d of 3)" % heard)
+	# The test launch: refused outside the box or off the hover; from the box
+	# at 35 m and a hover it goes in a minute, and that wins the patrol.
+	var wl = _mission("us_ssbn", "patrol")
+	wl.t = 100.0
+	wl.weapon = "trident"
+	wl.fire(3)
+	var refused_out: bool = wl.launch_seq < 0.0
+	wl.sub.pos = wl.box
+	wl.sub.depth = 35.0
+	wl.sub.dep_ord = 35.0
+	wl.sub.spd = 8.0
+	wl.fire(3)
+	var refused_fast: bool = wl.launch_seq < 0.0
+	wl.sub.spd = 0.0
+	wl.sub.tel = 2
+	wl.fire(3)
+	var started: bool = wl.launch_seq >= 0.0
+	for i in 650:
+		wl.update(0.1)
+	check(refused_out and refused_fast and started and wl.result == "launched" and wl.trident == 0,
+		"the test launch needs the box and a hover, then goes in a minute and wins (result '%s')" % wl.result)
 
 
 func _modern_tests() -> void:

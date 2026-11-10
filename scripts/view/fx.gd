@@ -373,13 +373,14 @@ func missile_body(kind: String) -> Dictionary:
 	var n := Node3D.new()
 	add_child(n)
 	var sam := kind == "sam"
-	var length := 6.6 if sam else (6.2 if kind == "tomahawk" else 4.6)
-	var r := 0.23 if sam else (0.27 if kind == "tomahawk" else 0.17)
-	var mat := MeshKit.mat(Color(0.86, 0.86, 0.83) if sam else Color(0.42, 0.44, 0.45), 0.55, 0.2)
+	var big := kind == "trident"
+	var length := 6.6 if sam else (6.2 if kind == "tomahawk" else (13.4 if big else 4.6))
+	var r := 0.23 if sam else (0.27 if kind == "tomahawk" else (1.05 if big else 0.17))
+	var mat := MeshKit.mat(Color(0.86, 0.86, 0.83) if sam or big else Color(0.42, 0.44, 0.45), 0.55, 0.2)
 	var meshes := []
 	var body := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
-	cm.top_radius = r * 0.3
+	cm.top_radius = r * (0.55 if big else 0.3)
 	cm.bottom_radius = r
 	cm.height = length
 	cm.radial_segments = 10
@@ -391,6 +392,8 @@ func missile_body(kind: String) -> Dictionary:
 	# Wings (cruise missiles) or fins (all), as thin plates.
 	var plates := [[Vector3(length * 0.5 if not sam else 1.0, 0.05, 0.5), Vector3(0, 0, 0.3 if not sam else 1.6)],
 		[Vector3(0.05, 1.0, 0.45), Vector3(0, 0, length * 0.44)], [Vector3(1.0, 0.05, 0.45), Vector3(0, 0, length * 0.44)]]
+	if big:
+		plates = []
 	for pl in plates:
 		var mi := MeshInstance3D.new()
 		var bm := BoxMesh.new()
@@ -411,23 +414,40 @@ func missile_body(kind: String) -> Dictionary:
 	flame.initial_velocity_min = 14.0
 	flame.initial_velocity_max = 22.0
 	flame.gravity = Vector3.ZERO
-	flame.scale_amount_min = 0.9 if sam else 1.3
-	flame.scale_amount_max = 1.5 if sam else 2.2
+	flame.scale_amount_min = 0.9 if sam else (4.5 if big else 1.3)
+	flame.scale_amount_max = 1.5 if sam else (8.0 if big else 2.2)
+	if big:
+		flame.amount = 40
+		flame.lifetime = 0.5
+		flame.initial_velocity_min = 30.0
+		flame.initial_velocity_max = 45.0
 	flame.color_ramp = ramp(Color(1, 1, 1, 1), Color(0.4, 1, 1, 0))
 	flame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	flame.position = Vector3(0, 0, length * 0.5 + 0.3)
 	n.add_child(flame)
 	# Enough puffs, close enough together, to read as a trail at their speed.
-	var smoke := funnel_smoke(n, Vector3(0, 0, length * 0.5 + 0.8), m_steam, 1.8 if sam else 1.5)
-	smoke.amount = 200 if sam else 70
-	smoke.lifetime = 2.6 if sam else 8.0
+	var smoke := funnel_smoke(n, Vector3(0, 0, length * 0.5 + 0.8), m_steam, 1.8 if sam else (7.0 if big else 1.5))
+	smoke.amount = 200 if sam else (900 if big else 70)
+	smoke.lifetime = 2.6 if sam else (18.0 if big else 8.0)
 	smoke.direction = Vector3(0, 0, 1)
 	smoke.spread = 12.0
 	smoke.initial_velocity_min = 0.5
 	smoke.initial_velocity_max = 2.0
 	smoke.gravity = wind * 0.7 + Vector3(0, 0.15, 0)
 	smoke.color_ramp = stops([[0.0, Color(1, 1, 1, 0.0)], [0.04, Color(1.2, 1.2, 1.2, 0.85)], [0.5, Color(1.2, 1.2, 1.2, 0.45)], [1.0, Color(1.3, 1.3, 1.3, 0)]])
-	return {"node": n, "meshes": meshes, "flame": flame, "smoke": smoke}
+	var rec := {"node": n, "meshes": meshes, "flame": flame, "smoke": smoke}
+	if big:
+		# The first stage's glare lights up its own smoke at night.
+		var glow := OmniLight3D.new()
+		glow.light_color = Color(1.0, 0.75, 0.45)
+		glow.omni_range = 450.0
+		glow.light_energy = 10.0
+		glow.shadow_enabled = false
+		glow.position = Vector3(0, 0, length * 0.5 + 4.0)
+		glow.visible = false
+		n.add_child(glow)
+		rec["light"] = glow
+	return rec
 
 
 ## A missile gone (hit, shot down or into the sea): the airframe vanishes and
@@ -437,6 +457,8 @@ func drop_missile(rec: Dictionary) -> void:
 		(mi as Node3D).visible = false
 	(rec["flame"] as CPUParticles3D).emitting = false
 	(rec["smoke"] as CPUParticles3D).emitting = false
+	if rec.has("light"):
+		(rec["light"] as Node3D).visible = false
 	var n: Node3D = rec["node"]
 	get_tree().create_timer(9.0).timeout.connect(n.queue_free)
 
@@ -448,6 +470,18 @@ func broach(pos: Vector3) -> void:
 		stops([[0.0, Color(1, 1, 1, 0.0)], [0.05, Color(1.2, 1.2, 1.2, 0.85)], [1.0, Color(1.3, 1.3, 1.3, 0)]]),
 		true, Vector3.UP, Vector3(2.0, 0.5, 2.0), Vector3(0.5, 1.4, 2.6), Vector2(0.6, 1.4))
 	_light(pos + Vector3(0, 6, 0), Color(1.0, 0.75, 0.45), 90.0, 5.0, 0.5)
+
+
+## A ballistic missile test launch: the sea heaves as the gas charge throws
+## her clear, a great burst of spray and steam, and the first stage's glare.
+func trident_launch(pos: Vector3) -> void:
+	splash(Vector3(pos.x, 0.0, pos.z), 6.0)
+	particles(Vector3(pos.x, 2.0, pos.z), m_steam, 40, 14.0, Vector2(4.0, 14.0), 40.0, Vector2(8.0, 16.0), wind * 1.0 + Vector3(0, 1.2, 0),
+		stops([[0.0, Color(1, 1, 1, 0.0)], [0.05, Color(1.25, 1.25, 1.25, 0.9)], [1.0, Color(1.35, 1.35, 1.35, 0)]]),
+		true, Vector3.UP, Vector3(6.0, 1.0, 6.0), Vector3(0.5, 1.5, 3.0), Vector2(0.4, 1.0))
+	_patch(pos, 30.0, 40.0, 1.0)
+	_patch(pos, 22.0, 4.0, 1.0, true)
+	pending.append({"at": t + 1.4, "fn": "flash", "pos": pos + Vector3(0, 30, 0)})
 
 
 ## A surface-to-air missile leaving its cell: a flash and a gout of smoke.
@@ -709,6 +743,8 @@ func update(dt: float) -> void:
 					splash(p["pos"], p["size"])
 				"bullet":
 					_bullet(p["pos"])
+				"flash":
+					_light(p["pos"], Color(1.0, 0.85, 0.6), 600.0, 18.0, 2.5)
 		else:
 			keep_p.append(p)
 	pending = keep_p

@@ -36,6 +36,9 @@ const AIRCRAFT := {
 	"kate": {"name": "B5N Kate", "kn": 160, "span": 15.5, "len": 10.3, "engines": 1, "kind": "single", "hp": 3, "bombs": 1},
 	# Near future: anti-submarine helicopters carry homing torpedoes, not bombs.
 	"z20": {"name": "Z-20F helicopter", "kn": 140, "span": 16.4, "len": 15.4, "engines": 2, "kind": "helo", "hp": 2, "bombs": 2},
+	# A four-turboprop patrol aircraft that lays sonobuoy lines and drops torpedoes.
+	"kq200": {"name": "KQ-200 patrol aircraft", "kn": 300, "span": 38.0, "len": 34.0, "engines": 4, "kind": "mpa", "hp": 6, "bombs": 6,
+		"buoys": 60},
 }
 
 ## Near-future missiles your boats carry: speed, reach, warhead, how far out
@@ -47,6 +50,9 @@ const MISSILES := {
 		"seeker": 15000.0, "cone": 30.0, "cruise": 6.0, "launch": "tube", "link": false},
 	"tomahawk": {"name": "Tomahawk", "long": "Tomahawk Maritime Strike", "kn": 470.0, "range": 1600000.0, "kg": 450.0,
 		"seeker": 22000.0, "cone": 40.0, "cruise": 12.0, "launch": "vls", "link": true},
+	# An unarmed test round: fired from the launch box for a flight to the test range.
+	"trident": {"name": "Trident", "long": "Trident II D5 test round", "kn": 0.0, "range": 0.0, "kg": 0.0,
+		"seeker": 0.0, "cone": 0.0, "cruise": 0.0, "launch": "vls", "link": false},
 }
 
 ## Their air defence by ship class. `mast` is the height of the search radar
@@ -197,6 +203,36 @@ static func nations() -> Dictionary:
 						_m("t052d#123", "Huainan", "ddg", 157, 18, 6.5, 30, 1.5, Vector2(3000, 3000)),
 						_m("t054a#569", "Yulin", "ffg", 134, 16, 5.0, 27, 1, Vector2(-3500, -2500)),
 					]}),
+				_t("jin", "Jin 416", "cn", "ssbn", 135, 12.5, 11, 20, 2, 0, 0, "night", false, false, "Fictional scenario",
+					"A Type 094 ballistic-missile submarine on patrol in her bastion, a Type 093 riding shotgun on her quarter and a Type 054A sweeping overhead. Find her by ear, and sink her before her escort finds you.",
+					["z20"], "t094#416").merged({"target_name": "Jin 416", "start": [11000.0, 15000.0], "approach": "crossing", "group": [
+						_m("t093#409", "Shang 409", "ssn", 110, 11, 10, 30, 1, Vector2(-2500, 3000)),
+						_m("t054a#571", "Yuncheng", "ffg", 134, 16, 5.0, 27, 1, Vector2(5000, -5000)),
+					]}),
+			],
+		},
+		"us_ssbn": {
+			"id": "us_ssbn", "era": "modern", "navy": "us", "name": "United States", "boat": "Ohio-class ballistic-missile submarine",
+			"sub_kn": 25.0, "surf_kn": 15.0, "test": 240.0, "crush": 400.0, "dive_time": 30.0,
+			"nuclear": true, "escape": 60000.0, "fire_max": 240.0,
+			"quiet": 0.8,
+			"tubes": 4, "torps": 16, "decoys": 12,
+			"torp": {"name": "Mk 48 ADCAP", "kn": 55.0, "range": 38000.0, "dud": 0.0, "wake": false, "kg": 295.0,
+				"homing": true, "wire": true, "seeker": 2800.0, "cone": 45.0},
+			"missiles": {"trident": 1},
+			"gun": {}, "aa": {},
+			"sub": {"len": 170.7, "beam": 12.8, "tower": 0.3, "style": "ohio"},
+			"bt": true,
+			"blurb": "The quietest boat at sea, built to stay hidden. This patrol she carries an unarmed Trident II test round for a demonstration flight, and Mk 48s to defend herself.",
+			"targets": [
+				_t("patrol", "Deterrent patrol", "cn", "ssn", 110, 11, 10, 30, 1, 0, 0, "night", false, false, "Fictional scenario",
+					"Slip through a sea the PLA Navy is sweeping for submarines and fire an unarmed Trident II test round from the launch box, 22 km north: proof the deterrent is still out there. Two Type 093s are hunting, a Type 054A drags its sonar across the way, and a KQ-200 lays sonobuoys.",
+					["kq200", "z20"], "t093#409").merged({"goal": "patrol", "box": Vector2(0, 22000), "box_r": 3000.0, "escape": 1e9,
+					"title": "Deterrent patrol", "target_name": "Shang 409", "patrol": [Vector2(-9000, 9000), Vector2(9000, 11000)],
+					"group": [
+						_m("t093#418", "Shang 418", "ssn", 110, 11, 10, 30, 1, Vector2.ZERO).merged({"patrol": [Vector2(9000, 23000), Vector2(3000, 17000)]}),
+						_m("t054a#577", "Huanggang", "ffg", 134, 16, 5.0, 27, 1, Vector2.ZERO).merged({"patrol": [Vector2(-11000, 15000), Vector2(11000, 16000)]}),
+					]}),
 			],
 		},
 		"us_ssgn": {
@@ -290,7 +326,7 @@ const HELP_MODERN := [
 	["P", "Raise or lower the mast"],
 	["Z, mouse wheel", "Mast zoom"],
 	["L, left click", "Track a ship (mast or sonar)"],
-	["Q", "Weapon: Mk 48, Harpoon, Tomahawk"],
+	["Q", "Weapon: Mk 48, missiles, Trident"],
 	["Space / X", "Fire one / two Mk 48s or a missile salvo"],
 	["[  ]", "Missile salvo size"],
 	["G", "Cut the guidance wires"],
@@ -306,11 +342,12 @@ const HELP_MODERN := [
 
 const NATION_ORDER := ["us", "uk", "de", "jp"]
 ## Near-future boats, in menu order.
-const MODERN_ORDER := ["us_ssn", "us_ssgn"]
+const MODERN_ORDER := ["us_ssn", "us_ssgn", "us_ssbn"]
 
 const TYPE_NAMES := {"bb": "Battleship", "cv": "Aircraft carrier", "ca": "Heavy cruiser",
 	"cl": "Light cruiser", "dd": "Destroyer", "pc": "Sub-chaser",
-	"cg": "Guided-missile cruiser", "ddg": "Guided-missile destroyer", "ffg": "Guided-missile frigate"}
+	"cg": "Guided-missile cruiser", "ddg": "Guided-missile destroyer", "ffg": "Guided-missile frigate",
+	"ssn": "Nuclear attack submarine", "ssbn": "Ballistic-missile submarine"}
 
 
 static func is_modern(nat: Dictionary) -> bool:
@@ -555,6 +592,10 @@ static func _layout(key: String) -> Dictionary:
 				"hangar": {"x0": 0.66, "x1": 0.78, "wf": 0.65, "h": 5.0},
 				"helideck": {"x0": 0.78, "x1": 0.97},
 				"ciws": [0.40, 0.65], "hull_no": "530", "towed": true, "aa": 0}
+		"t093":
+			return {"hull": "sub", "fb": 1.0, "fb_bow": 1.0, "sheer": "modern", "paint": "cn", "sub": "t093", "aa": 0}
+		"t094":
+			return {"hull": "sub", "fb": 1.0, "fb_bow": 1.0, "sheer": "modern", "paint": "cn", "sub": "t094", "aa": 0}
 		"shandong":
 			return {"hull": "cv", "fb": 11.0, "fb_bow": 14.0, "sheer": "modern", "paint": "cn",
 				"deck": {"h": 25.0, "x0": 0.0, "x1": 0.99, "w": 75.0, "bow": "enclosed", "angled": 9.0, "cats": 0, "ski": 12.0},

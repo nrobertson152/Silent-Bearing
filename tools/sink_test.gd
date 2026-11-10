@@ -23,6 +23,7 @@ func _process(_dt: float) -> bool:
 			_run(c[0], c[1], how)
 	_modern_battle()
 	_missile_battle()
+	_sub_battle()
 	print("SINK %s" % ("OK" if fails == 0 else "FAIL (%d)" % fails))
 	quit(1 if fails > 0 else 0)
 	return true
@@ -94,6 +95,70 @@ func _missile_battle() -> void:
 	if not ok:
 		fails += 1
 	view.queue_free()
+
+
+## Submarine against submarine, a patrol plane laying buoys, and the test
+## launch, all with the view attached.
+func _sub_battle() -> void:
+	var nat: Dictionary = GameData.nations()["us_ssn"]
+	var spec: Dictionary = {}
+	for t in nat["targets"]:
+		if t["id"] == "jin":
+			spec = t
+	var w = Sim.create(nat, spec)
+	var tg: World.Ship = w.target
+	w.sub.pos = tg.pos + U.dirv(tg.hdg + 90.0) * 5000.0
+	w.sub.depth = tg.depth
+	w.sub.dep_ord = tg.depth
+	var view := WorldView.new()
+	root.add_child(view)
+	view.setup(w)
+	w.lock_ship(tg)
+	w.lock_obs = 20.0
+	w.fire(2)
+	var frames := 0
+	while frames < 2500 and w.result == "":
+		w.update(0.2)
+		for ev in w.events:
+			view.handle_event(ev)
+		w.events.clear()
+		view.sync(0.2, Vector3(tg.pos.x, -60, -tg.pos.y + 300))
+		frames += 1
+	var ok: bool = w.hits > 0
+	view.queue_free()
+	# The patrol: buoys going in, then the launch.
+	var nb: Dictionary = GameData.nations()["us_ssbn"]
+	var p = Sim.create(nb, nb["targets"][0])
+	var v2 := WorldView.new()
+	root.add_child(v2)
+	v2.setup(p)
+	for i in 1500:
+		p.update(0.2)
+		for ev in p.events:
+			v2.handle_event(ev)
+		p.events.clear()
+		v2.sync(0.2, Vector3(p.sub.pos.x, 30, -p.sub.pos.y))
+	var buoys: int = p.buoys.size()
+	p.sub.pos = p.box
+	p.sub.depth = 35.0
+	p.sub.dep_ord = 35.0
+	p.sub.spd = 0.0
+	p.sub.tel = 2
+	p.etorps.clear()
+	p.weapon = "trident"
+	p.fire(3)
+	for i in 400:
+		p.update(0.2)
+		for ev in p.events:
+			v2.handle_event(ev)
+		p.events.clear()
+		v2.sync(0.2, Vector3(p.sub.pos.x, 30, -p.sub.pos.y + 400))
+	ok = ok and buoys > 0 and p.result == "launched"
+	print("SINK %s submarine war: Jin hunt '%s' with %d hits; %d buoys laid; patrol '%s'" % ["ok  " if ok else "FAIL", w.result,
+		w.hits, buoys, p.result])
+	if not ok:
+		fails += 1
+	v2.queue_free()
 
 
 func _run(nid: String, tid: String, how: String) -> void:

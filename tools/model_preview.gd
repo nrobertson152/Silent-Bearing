@@ -72,6 +72,10 @@ func _init() -> void:
 	for nid in GameData.NATION_ORDER + GameData.MODERN_ORDER:
 		if only == "" or only == "sub_" + nid:
 			shots.append(["sub", nid])
+	# Their submarines.
+	for st in [["t093", 110.0, 11.0], ["t094", 135.0, 12.5]]:
+		if only == "" or only == "sub_" + st[0]:
+			shots.append(["esub", st[0], st[1], st[2]])
 	for key in GameData.AIRCRAFT:
 		if only == "" or only == "air_" + key:
 			shots.append(["plane", key])
@@ -97,6 +101,10 @@ func _process(_d: float) -> bool:
 				if GameData.is_modern(GameData.nations()[s[1]]):
 					# Lift the boat clear of the sea to see the whole hull.
 					node.position.y = 12.0
+			"esub":
+				node = SubBuilder.build({"sub": {"len": s[2], "beam": s[3], "tower": 0.3, "style": s[1]}})
+				size = s[2]
+				node.position.y = 12.0
 			"plane":
 				var info: Dictionary = GameData.AIRCRAFT[s[1]]
 				node = PlaneBuilder.build(info, "us")

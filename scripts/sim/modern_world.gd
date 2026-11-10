@@ -33,6 +33,16 @@ const SALVOS := [1, 2, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 154]
 const LINK_EVERY := 150.0
 ## Escorts only leave the screen to hunt a datum closer than this.
 const HUNT_RADIUS := 35000.0
+## Their submarines, and the heavyweight torpedoes they fire (Yu-6 class).
+const SUBS := ["ssn", "ssbn"]
+const HW_KN := 50.0
+const HW_RANGE := 40000.0
+const HW_SEEKER := 2500.0
+## The Trident test launch: depth window, hover speed, and how long the
+## launch sequence takes.
+const LAUNCH_DEPTH := Vector2(25.0, 45.0)
+const HOVER_KN := 3.0
+const LAUNCH_T := 60.0
 
 
 ## A homing torpedo: your Mk 48s, and the enemy's lightweight torpedoes.
@@ -103,8 +113,25 @@ class Missile:
 	var trail: Array = []
 
 
+## A sonobuoy a patrol aircraft has laid: it floats and listens.
+class Buoy:
+	var id := 0
+	var pos := Vector2.ZERO
+	var life := 3600.0
+	var heard := false         # we heard it splash in, so it is on our plot
+
+
 var etorps: Array[Homer] = []
 var decoys: Array[Decoy] = []
+var buoys: Array[Buoy] = []
+var mpa_route := {}              # patrol aircraft id -> its racetrack waypoints
+var mpa_wp := {}                 # patrol aircraft id -> index of the waypoint it is flying to
+var mpa_buoys := {}              # patrol aircraft id -> sonobuoys left
+var trident := 0                 # test rounds aboard
+var launch_seq := -1.0           # when the launch sequence started, or -1
+var launched := false
+var box := Vector2.ZERO          # the launch box
+var box_r := 0.0
 var missiles: Array[Missile] = []
 var weapon := "mk48"             # mk48, harpoon, tomahawk
 var salvo := 4
@@ -150,7 +177,14 @@ func _init(nation: Dictionary, target_spec: Dictionary, is_demo := false) -> voi
 	var ms: Dictionary = nat.get("missiles", {})
 	harpoons = int(ms.get("harpoon", 0))
 	vls = int(ms.get("tomahawk", 0))
-	if spec.has("start"):
+	trident = int(ms.get("trident", 0))
+	if spec.get("goal", "") == "patrol":
+		# Deep below the layer, creeping.
+		sub.depth = 150.0
+		sub.dep_ord = 150.0
+		sub.tel = 3
+		sub.spd = 0.24 * float(nat["sub_kn"])
+	if spec.has("start") and spec.get("type", "") not in SUBS:
 		# A missile strike from beyond sonar range: Tomahawks up first.
 		weapon = "tomahawk" if vls > 0 else "mk48"
 		salvo = 64 if vls >= 64 else 4
@@ -158,8 +192,18 @@ func _init(nation: Dictionary, target_spec: Dictionary, is_demo := false) -> voi
 
 
 func _opening() -> void:
+	if spec.get("goal", "") == "patrol":
+		var b: Vector2 = spec["box"]
+		report("Conn: on patrol at 150 metres. The launch box is bearing %s, %d km. Hunters about: keep it slow and deep." % [
+			U.p3(U.brg(sub.pos, b)), int(sub.pos.distance_to(b) / 1000.0)], "good")
+		report("Sonar: towed array streamed. Listening.")
+		report("Bathythermograph: thermal layer near %d metres. Stay below it and their hull sonars and buoys hear us half as well." % int(layer_depth))
+		return
 	report("Conn: on station at 60 metres, ahead one-third. Hunting %s and her group." % target.name, "good")
-	if spec.has("start"):
+	if spec.has("start") and target.type in SUBS:
+		report("Intelligence puts %s about %d km off, bearing %s. She's deep and slow: listen for her on the array." % [
+			target.short, int(round(sub.pos.distance_to(target.pos) / 1000.0)), U.p3(U.wrap360(U.brg(sub.pos, target.pos) + randf_range(-12.0, 12.0)))], "info")
+	elif spec.has("start"):
 		report("Radio: %s's group is about %d km off, too far to hear. Come up, raise the mast and take the link for her position." % [
 			target.short, int(sub.pos.distance_to(target.pos) / 5000.0) * 5], "info")
 	report("Sonar: towed array streamed. Listening.")
@@ -172,8 +216,8 @@ func _spawn() -> void:
 	var tg := Ship.new()
 	tg.id = _new_id()
 	tg.kind = "target"
-	tg.name = GameData.PREFIX[spec["nation"]] + spec["name"]
-	tg.short = spec["name"]
+	tg.name = String(spec.get("target_name", GameData.PREFIX[spec["nation"]] + spec["name"]))
+	tg.short = String(spec.get("target_name", spec["name"]))
 	tg.nation = spec["nation"]
 	tg.type = spec["type"]
 	tg.layout = spec["layout"]
@@ -187,10 +231,20 @@ func _spawn() -> void:
 	tg.cruise = tg.max_kn * 0.7
 	tg.hull = _make_hull(tg, float(spec["hp"]))
 	var start: Array = spec.get("start", [])
-	if start.size() == 2:
-		# Far out, more or less ahead, steaming toward us.
+	var line: Array = spec.get("patrol", [])
+	if line.size() == 2:
+		# A hunter sweeping a line across our way.
+		tg.route = line
+		tg.home = "patrol"
+		tg.state = "patrol"
+		tg.pos = (line[0] as Vector2).lerp(line[1], randf())
+		tg.hdg = U.brg(tg.pos, line[1])
+	elif start.size() == 2:
+		# Far out, more or less ahead, steaming toward us (or across).
 		tg.pos = U.dirv(sub.hdg + randf_range(-35.0, 35.0)) * randf_range(float(start[0]), float(start[1]))
 		tg.hdg = U.wrap360(U.brg(tg.pos, sub.pos) + randf_range(-25.0, 25.0))
+		if spec.get("approach", "") == "crossing":
+			tg.hdg = U.wrap360(tg.hdg + (90.0 if randf() < 0.5 else -90.0))
 	else:
 		var side := 1.0 if randf() < 0.5 else -1.0
 		tg.pos = Vector2(-side * randf_range(20000, 25000), randf_range(14000, 19000))
@@ -200,8 +254,12 @@ func _spawn() -> void:
 	tg.spd = tg.cruise
 	tg.want_spd = tg.cruise
 	tg.next_zig = randf_range(120, 240)
+	if tg.type in SUBS:
+		_make_sub(tg)
 	target = tg
 	ships.append(tg)
+	box = spec.get("box", Vector2.ZERO)
+	box_r = float(spec.get("box_r", 0.0))
 	for g in spec.get("group", []):
 		var e := Ship.new()
 		e.id = _new_id()
@@ -223,6 +281,17 @@ func _spawn() -> void:
 		e.hdg = tg.hdg
 		e.spd = tg.cruise
 		e.want_spd = tg.cruise
+		var route: Array = g.get("patrol", [])
+		if route.size() == 2:
+			e.route = route
+			e.home = "patrol"
+			e.state = "patrol"
+			e.pos = (route[0] as Vector2).lerp(route[1], randf())
+			e.hdg = U.brg(e.pos, route[1])
+			e.spd = 12.0
+			e.want_spd = 12.0
+		if e.type in SUBS:
+			_make_sub(e)
 		e.to_drop = 6 if e.type == "ffg" else 4       # torpedoes in the deck tubes
 		rocket_stock[e.id] = 3 if e.type in ["cg", "ddg"] else 0
 		ships.append(e)
@@ -232,7 +301,10 @@ func _spawn() -> void:
 		if e.type in ["cv", "cg", "ddg", "ffg"]:
 			pads.append(e)
 	for key in spec.get("air", []):
-		_spawn_helo(key, pads[planes.size() % pads.size()])
+		if GameData.AIRCRAFT[key]["kind"] == "mpa":
+			_spawn_mpa(key)
+		elif not pads.is_empty():
+			_spawn_helo(key, pads[planes.size() % pads.size()])
 	next_plane = 1e9
 	# Missile magazines for their air defence.
 	for sh in ships:
@@ -269,6 +341,46 @@ func _spawn_helo(key: String, pad: Ship) -> void:
 	helo_pad[p.id] = pad.id
 
 
+## A submarine of theirs: deep, slow and quiet until it has reason not to be.
+func _make_sub(sh: Ship) -> void:
+	sh.depth = randf_range(120.0, 180.0) if sh.type == "ssn" else 110.0
+	sh.want_depth = sh.depth
+	sh.cruise = 6.0 if sh.type == "ssbn" else 8.0
+	sh.spd = sh.cruise
+	sh.want_spd = sh.cruise
+	sh.zig = false
+	sh.to_drop = 6 if sh.type == "ssn" else 0       # heavyweight torpedoes ready in the tubes
+	sh.next_zig = t + randf_range(300.0, 600.0)
+
+
+## A patrol aircraft flying a racetrack across our way, laying sonobuoy
+## lines as it goes.
+func _spawn_mpa(key: String) -> void:
+	var info: Dictionary = GameData.AIRCRAFT[key]
+	var p := Aircraft.new()
+	p.id = _new_id()
+	p.key = key
+	p.info = info
+	p.name = info["name"]
+	p.kn = info["kn"]
+	p.hp = info["hp"]
+	p.bombs = info["bombs"]
+	p.state = "patrol"
+	p.alt = 500.0
+	# Two legs across the way to the box, at a third and two thirds of the way.
+	var goal: Vector2 = spec.get("box", target.pos)
+	var d := goal - sub.pos
+	var across := U.dirv(U.brg(sub.pos, goal) + 90.0) * 13000.0
+	var n1 := sub.pos + d * 0.38
+	var n2 := sub.pos + d * 0.68
+	mpa_route[p.id] = [n1 - across, n1 + across, n2 + across, n2 - across]
+	mpa_wp[p.id] = 1
+	mpa_buoys[p.id] = int(info.get("buoys", 40))
+	p.pos = n1 - across - U.dirv(U.brg(n1 - across, n1 + across)) * 4000.0
+	p.hdg = U.brg(p.pos, n1 + across)
+	planes.append(p)
+
+
 func _set_depths() -> void:
 	depths = [0.0, 12.0, 30.0, 60.0, 100.0, 150.0, 200.0, float(nat["test"])]
 
@@ -277,10 +389,17 @@ func _set_depths() -> void:
 ## How far the towed array hears a ship: bigger and faster is louder, and
 ## your own speed drowns everything out.
 func _hear_range(sh: Ship) -> float:
-	var base: float = {"cv": 42000.0, "cg": 30000.0, "ddg": 27000.0, "ffg": 21000.0}.get(sh.type, 24000.0)
+	var base: float = {"cv": 42000.0, "cg": 30000.0, "ddg": 27000.0, "ffg": 21000.0, "ssn": 11000.0, "ssbn": 16000.0}.get(sh.type, 24000.0)
 	var loud := 0.45 + 0.55 * clampf(sh.spd / 20.0, 0.0, 1.5)
 	var own := clampf(1.15 - (absf(sub.spd) - 8.0) / 14.0, 0.12, 1.0)
 	var layer := 0.6 if (sub.depth > layer_depth) else 1.0
+	if sh.type in SUBS:
+		# A quiet submarine creeping is far harder to hear than one sprinting;
+		# across the layer from us, harder still. One that just fired is loud.
+		loud = 0.3 + 0.7 * clampf(sh.spd / 16.0, 0.0, 1.8)
+		layer = 0.55 if (sub.depth > layer_depth) != (sh.depth > layer_depth) else 1.0
+		if t < sh.loud_until:
+			loud *= 3.0
 	if sub.surfaced():
 		own *= 0.5
 	return base * loud * own * layer * (0.3 + 0.7 * sub.sys["hydrophones"] / 100.0)
@@ -296,6 +415,10 @@ func _class_name(sh: Ship) -> String:
 			return "Gas turbines: a destroyer"
 		"ffg":
 			return "Diesels: a frigate"
+		"ssn":
+			return "Reactor pumps and a seven-bladed screw, submerged: a Type 093 attack submarine"
+		"ssbn":
+			return "Big reactor plant, slow screw, submerged: a Type 094 missile submarine"
 	return "A warship"
 
 
@@ -310,7 +433,7 @@ func _observe(dt: float) -> void:
 		if sh.heard and not sh.ever_heard:
 			sh.ever_heard = true
 			report("Sonar: new contact on the towed array, bearing %s. %s." % [U.p3(U.brg(s.pos, sh.pos)), _class_name(sh)])
-		if see and r < vis and sh.alive():
+		if see and r < vis and sh.alive() and sh.depth < 3.0:
 			sh.plot = {"pos": sh.pos, "hdg": sh.hdg, "spd": sh.spd, "t": t}
 			if not sh.ever_seen:
 				sh.ever_seen = true
@@ -335,7 +458,7 @@ func _observe(dt: float) -> void:
 	if s.scope_up and s.depth <= PERI_MAX and not s.surfaced():
 		mast_t += dt
 		for e in ships:
-			if not e.alive():
+			if not e.alive() or e.depth > 3.0:
 				continue
 			var r := s.pos.distance_to(e.pos)
 			if r < 16000.0 and randf() < dt * 0.02 * (1.0 - r / 16000.0) * clampf(mast_t / 20.0, 0.3, 2.0):
@@ -391,7 +514,7 @@ func lock_ship(sh: Ship) -> void:
 		lock_err = Vector2(U.gauss(), U.gauss())
 		lock_rng_err = U.gauss()
 	lock = sh
-	if sub.can_see() and sub.scope_up and sub.pos.distance_to(sh.pos) < vis:
+	if sub.can_see() and sub.scope_up and sub.pos.distance_to(sh.pos) < vis and sh.depth < 3.0:
 		report("Fire control: tracking %s on the mast. Laser range taken." % sh.name, "good")
 		lock_obs = maxf(lock_obs, 6.0)
 	else:
@@ -448,6 +571,9 @@ func solution():
 func fire(n := 1, view_brg := -1.0) -> void:
 	if result != "" or demo:
 		return
+	if weapon == "trident":
+		start_test_launch()
+		return
 	if weapon != "mk48":
 		fire_missiles(weapon, 1 if n <= 1 else salvo)
 		return
@@ -490,6 +616,9 @@ func fire(n := 1, view_brg := -1.0) -> void:
 		tp.rng = nat["torp"]["range"]
 		tp.wake = false
 		tp.depth = clampf(s.depth, 20.0, 80.0)
+		if lock != null and lock.depth > 3.0:
+			# Against a submarine, run out near the depth we think she's at.
+			tp.depth = clampf(lock.depth + randf_range(-30.0, 30.0), 30.0, 300.0)
 		tp.wire = true
 		tp.seeker = nat["torp"]["seeker"]
 		tp.cone = nat["torp"]["cone"]
@@ -534,7 +663,7 @@ func launch_decoy() -> void:
 		report("We can't launch decoys on the surface.", "warn")
 		return
 	if s.decoys <= 0:
-		report("Countermeasures: no decoys left!", "warn")
+		report("Countermeasures: no decoys left!", "warn", "nodecoys", 10.0)
 		return
 	if t < decoy_cool:
 		return
@@ -555,6 +684,8 @@ func _update_torps(dt: float) -> void:
 	_update_rockets(dt)
 	_update_enemy_torps(dt)
 	_update_missiles(dt)
+	_update_buoys(dt)
+	_update_launch(dt)
 	var keep: Array[Decoy] = []
 	for d in decoys:
 		d.life -= dt
@@ -601,6 +732,8 @@ func _update_mk48(dt: float) -> void:
 				else:
 					var lead := sh.pos + U.dirv(sh.hdg) * sh.spd * U.KN * (tp.pos.distance_to(sh.pos) / (tp.kn * U.KN)) * 0.6
 					tp.course = U.brg(tp.pos, lead)
+					if sh.depth > 3.0:
+						tp.depth = move_toward(tp.depth, sh.depth, 10.0 * dt)
 			"decoy":
 				tp.course = U.brg(tp.pos, tp.fake)
 				if tp.pos.distance_to(tp.fake) < 40.0:
@@ -615,6 +748,8 @@ func _update_mk48(dt: float) -> void:
 					continue
 				var r := tp.pos.distance_to(sh.pos)
 				if r > tp.seeker or absf(U.adiff(U.brg(tp.pos, sh.pos), tp.hdg)) > tp.cone:
+					continue
+				if sh.depth > 3.0 and absf(sh.depth - tp.depth) > 220.0:
 					continue
 				var sc := sh.length / maxf(r, 50.0) * (1.4 if sh.id == tp.aim_id else 1.0)
 				if sc > score:
@@ -638,7 +773,7 @@ func _update_mk48(dt: float) -> void:
 			tp.trail.append(tp.pos)
 		var hit: Ship = null
 		for sh in ships:
-			if sh.alive() and _inside(sh, tp.pos):
+			if sh.alive() and _inside(sh, tp.pos) and (sh.depth < 3.0 or absf(tp.depth - sh.depth) < 15.0):
 				hit = sh
 				break
 		if hit != null and tp.run > ARM_DIST:
@@ -693,12 +828,16 @@ func _new_datum(p: Vector2, err: float, by: Ship) -> void:
 	alert = true
 	# Escorts close enough go hunting; the rest keep the screen round her.
 	for e in ships:
-		if e.kind != "target" and e.alive() and e.state == "screen" and e.pos.distance_to(datum) < HUNT_RADIUS:
+		if (e.kind != "target" or e.type == "ssn") and e.alive() and e.state in ["screen", "patrol"] \
+				and e.pos.distance_to(datum) < HUNT_RADIUS:
 			e.state = "hunt"
 			e.search_until = t + 600.0
 
 
 func _mk48_hit(tp: Homer, sh: Ship) -> void:
+	if sh.depth > 3.0:
+		_sub_hit(tp, sh)
+		return
 	var r := sub.pos.distance_to(sh.pos)
 	var spot := hull_spot(sh, tp.pos)
 	sh.hits_taken += 1
@@ -727,6 +866,8 @@ func weapons() -> Array:
 		out.append("harpoon")
 	if vls > 0:
 		out.append("tomahawk")
+	if trident > 0:
+		out.append("trident")
 	return out
 
 
@@ -742,13 +883,15 @@ func stock(w := "") -> int:
 			return harpoons
 		"tomahawk":
 			return vls
+		"trident":
+			return trident
 	return sub.spares + sub.tubes.count(0.0)
 
 
 func weapon_line() -> String:
 	var out := []
 	for k in weapons():
-		var short: String = {"mk48": "MK 48", "harpoon": "HARPOON", "tomahawk": "TLAM"}[k]
+		var short: String = {"mk48": "MK 48", "harpoon": "HARPOON", "tomahawk": "TLAM", "trident": "TRIDENT"}[k]
 		var txt := "%s x%d" % [short, stock(k)]
 		out.append("[%s]" % txt if k == weapon else txt)
 	out.append("DECOYS %d" % sub.decoys)
@@ -760,13 +903,16 @@ func cycle_weapon() -> void:
 	weapon = ws[(ws.find(weapon) + 1) % ws.size()]
 	if weapon == "mk48":
 		report("Weapons: Mk 48s. Space fires one, X two.")
+	elif weapon == "trident":
+		report("Weapons: the Trident test round. In the launch box, at %d to %d metres and a hover, X starts the launch." % [
+			int(LAUNCH_DEPTH.x), int(LAUNCH_DEPTH.y)])
 	else:
 		salvo = clampi(salvo, 1, maxi(stock(), 1))
 		report("Weapons: %ss, %d left. X fires a salvo of %d; [ and ] change it." % [weapon_name(), stock(), salvo])
 
 
 func salvo_step(d: int) -> void:
-	if weapon == "mk48":
+	if weapon in ["mk48", "trident"]:
 		report("Weapons: press Q to pick a missile first.")
 		return
 	var i := 0
@@ -791,7 +937,7 @@ func _link() -> void:
 	link_t = t
 	var n := 0
 	for sh in ships:
-		if not sh.alive():
+		if not sh.alive() or sh.depth > 3.0:
 			continue
 		var vel := U.dirv(sh.hdg) * sh.spd * U.KN
 		var age := randf_range(20.0, 90.0)
@@ -799,6 +945,11 @@ func _link() -> void:
 		oth[sh.id] = {"pos": sh.pos - vel * age + Vector2(U.gauss(), U.gauss()) * err * 0.5, "vel": vel, "t": t - age, "err": err}
 		n += 1
 	var tg := target
+	if tg.depth > 3.0:
+		# Satellites and patrol planes don't see submarines.
+		if n > 0:
+			report("Radio: link update. %d surface ship%s plotted; nothing on the submarines." % [n, "" if n == 1 else "s"])
+		return
 	if not tg.alive():
 		return
 	var est := aim_estimate(tg)
@@ -967,7 +1118,7 @@ func _update_missiles(dt: float) -> void:
 			_mindex[m.id] = m
 	var keep: Array[Missile] = []
 	for m in missiles:
-		var alive: bool = _fly_sam(m, dt) if m.owner >= 0 else _fly_missile(m, dt)
+		var alive: bool = _fly_sam(m, dt) if m.owner >= 0 else (_fly_trident(m, dt) if m.kind == "trident" else _fly_missile(m, dt))
 		if alive:
 			keep.append(m)
 	missiles = keep
@@ -1088,7 +1239,7 @@ func _seek(m: Missile) -> void:
 	var score := 0.0
 	var wanted: Ship = null
 	for sh in ships:
-		if not sh.alive() or sh.sinking > 0.2:
+		if not sh.alive() or sh.sinking > 0.2 or sh.depth > 3.0:
 			continue
 		var r := m.pos.distance_to(sh.pos)
 		# The Tomahawk's passive seeker picks her radars up from any direction.
@@ -1178,7 +1329,7 @@ func _detect_missiles() -> void:
 		var by: Ship = null
 		var seen := false
 		for sh in ships:
-			if not sh.alive():
+			if not sh.alive() or sh.depth > 3.0:
 				continue
 			var mast := float(GameData.air_defence(sh.layout).get("mast", 15.0))
 			if m.pos.distance_to(sh.pos) < minf(4120.0 * (sqrt(mast) + sqrt(maxf(m.alt, 1.0))), 150000.0):
@@ -1313,7 +1464,7 @@ func _ciws(sh: Ship, st: Dictionary, mounts: int, dt: float) -> void:
 	for m in missiles:
 		if used >= mounts:
 			break
-		if m.owner >= 0 or m.dead or not m.seen:
+		if m.owner >= 0 or m.dead or not m.seen or m.kind == "trident":
 			continue
 		var r := m.pos.distance_to(sh.pos)
 		if r > 3000.0:
@@ -1341,8 +1492,14 @@ func missile_status() -> Dictionary:
 	var out := {"weapon": weapon, "long": "Mk 48 ADCAP" if weapon == "mk48" else String(GameData.MISSILES[weapon]["long"]),
 		"salvo": salvo, "stock": stock(), "air": air, "seen": seen, "queued": launch_queue.size(), "fired": m_fired,
 		"hits": m_hits, "down": m_down, "linked": linked(), "link_age": t - link_t if link_t > -900.0 else -1.0,
-		"has_missiles": harpoons + vls > 0 or m_fired > 0}
-	if weapon != "mk48" and lock != null and lock.alive():
+		"has_missiles": harpoons + vls + trident > 0 or m_fired > 0,
+		"strike": harpoons + vls > 0 or m_fired - (1 if launched else 0) > 0}
+	if box_r > 0.0:
+		out["box_brg"] = U.brg(sub.pos, box)
+		out["box_d"] = sub.pos.distance_to(box)
+		out["in_box"] = in_box()
+		out["launch"] = t - launch_seq if launch_seq >= 0.0 else -1.0
+	if weapon in ["harpoon", "tomahawk"] and lock != null and lock.alive():
 		var est := aim_estimate(lock)
 		if not est.is_empty():
 			var d := sub.pos.distance_to(est[0])
@@ -1361,15 +1518,44 @@ func missiles_out() -> int:
 	return n
 
 
+## A Mk 48 bursting against a submerged submarine: one is usually the end
+## of an attack boat; a big missile boat may take two, and blows for the
+## surface after the first.
+func _sub_hit(tp: Homer, sh: Ship) -> void:
+	var r := sub.pos.distance_to(sh.pos)
+	sh.hits_taken += 1
+	hits += 1
+	emit({"type": "boom", "pos": Vector3(tp.pos.x, -sh.depth, tp.pos.y), "size": sh.length / 14.0, "kind": "torpedo_sub", "ship": sh.id})
+	sound("torp_hit", clampf(1.3 - r / 15000.0, 0.25, 1.0))
+	tc = 1
+	if sh.hits_taken >= int(round(float(sh.max_struct) / 100.0)):
+		sh.hull.mode = "founder"
+		sh.struct = 0.0
+		report("Sonar: unit %d hit %s! Breaking-up noises on her bearing... she's going down." % [tp.unit, sh.short], "good")
+		_ship_sunk(sh, "founder")
+	else:
+		sh.struct = sh.max_struct * 0.5
+		sh.hull.engines = 0.35
+		sh.want_depth = 0.0
+		report("Sonar: unit %d hit %s! She's blowing ballast, coming up. Hit her again!" % [tp.unit, sh.short], "good")
+	_torpedo_alarm(tp)
+
+
 # ------------------------------------------------------- their ASW ships
 ## The screen holds station until something gives you away, then hunts the
 ## datum: pinging, flying helicopters out, and firing homing torpedoes.
 func _escort_ai(e: Ship, dt: float) -> void:
+	if e.type in SUBS:
+		_sub_ai(e, dt)
+		return
 	var s := sub
 	var tg := target
 	var r := e.pos.distance_to(s.pos)
 	_listen(e, r, dt)
 	match e.state:
+		"patrol":
+			_patrol(e, dt)
+			e.want_spd = 12.0
 		"screen":
 			var st := _station(tg, e.off)
 			var want := U.brg(e.pos, st + U.dirv(tg.hdg) * 800.0)
@@ -1378,8 +1564,9 @@ func _escort_ai(e: Ship, dt: float) -> void:
 			e.want_spd = clampf(tg.spd + dist / 600.0, 4.0, e.max_kn) if absf(U.adiff(want, tg.hdg)) < 90.0 else tg.spd * 0.6
 		"hunt", "attack":
 			if t - datum_t > 420.0:
-				e.state = "screen"
-				report("Sonar: %s is heading back to her station." % e.short, "info", "back%d" % e.id, 60.0)
+				e.state = e.home
+				report("Sonar: %s is heading back to her %s." % [e.short, "patrol line" if e.home == "patrol" else "station"],
+					"info", "back%d" % e.id, 60.0)
 				return
 			var d := e.pos.distance_to(datum)
 			# Close to sonar range of the datum, then slow to listen.
@@ -1388,32 +1575,47 @@ func _escort_ai(e: Ship, dt: float) -> void:
 			e.state = "attack" if t - datum_t < 90.0 and datum_err < 1200.0 else "hunt"
 			if e.state == "attack" and t > e.next_dc:
 				_shoot_at_datum(e, d)
-	if e.state != "screen" and t > e.run_until:
+	if e.state in ["hunt", "attack"] and t > e.run_until:
 		# Active sonar while hunting.
 		e.run_until = t + 12.0
 		_ping(e, r)
 
 
 ## Passive listening on the hull sonar and towed array.
-func _listen(e: Ship, r: float, dt: float) -> void:
+## How loud the boat is, 0..1: slow and deep is near silent, fast and
+## shallow carries a long way. Some boats are quieter than others.
+func _own_noise() -> float:
 	var s := sub
-	if s.surfaced():
-		if r < 20000.0 and randf() < dt * 0.3:
-			_new_datum(s.pos, 100.0, e)
-		return
 	var noise := 0.14 + 0.86 * pow(clampf((absf(s.spd) - 5.0) / 23.0, 0.0, 1.0), 1.3)
 	if s.depth < 30.0 and absf(s.spd) > 12.0:
 		noise *= 1.4
-	var base: float = {"ffg": 26000.0, "ddg": 22000.0, "cg": 22000.0}.get(e.type, 15000.0)
+	return noise * float(nat.get("quiet", 1.0))
+
+
+func _listen(e: Ship, r: float, dt: float) -> void:
+	var s := sub
+	if s.surfaced():
+		if r < 20000.0 and randf() < dt * 0.3 and e.depth < 3.0:
+			_new_datum(s.pos, 100.0, e)
+		return
+	var noise := _own_noise()
+	var base: float = {"ffg": 26000.0, "ddg": 22000.0, "cg": 22000.0, "ssn": 20000.0, "ssbn": 9000.0}.get(e.type, 15000.0)
 	if e.spd > 20.0:
 		base *= 0.5
 	var layer := 0.55 if s.depth > layer_depth else 1.0
 	if e.type == "ffg" or e.type == "ddg":
 		layer = maxf(layer, 0.8)   # towed arrays and variable-depth sonar go under the layer
+	if e.type in SUBS:
+		# A submarine sprinting hears nothing over its own flow noise; across
+		# the layer from us it hears half as far.
+		if e.spd > 12.0:
+			base *= 0.35
+		layer = 0.55 if (s.depth > layer_depth) != (e.depth > layer_depth) else 1.0
 	var rng := base * noise * layer * (0.5 if e.hull.health() < 0.6 else 1.0)
 	if r < rng and randf() < dt * 0.25 * (1.0 - r / rng):
 		_new_datum(s.pos, 300.0 + r * 0.06, e)
-		report("Sonar: %s has changed course toward us. I think she hears us." % e.short, "warn", "heard%d" % e.id, 45.0)
+		if e.heard:
+			report("Sonar: %s has changed course toward us. I think she hears us." % e.short, "warn", "heard%d" % e.id, 45.0)
 
 
 func _ping(e: Ship, r: float) -> void:
@@ -1464,7 +1666,7 @@ func _update_rockets(dt: float) -> void:
 
 ## An enemy lightweight torpedo enters the water at `at` and runs toward
 ## `toward`, then circles searching.
-func _drop_torpedo(at: Vector2, toward: Vector2, owner: int, msg: String) -> void:
+func _drop_torpedo(at: Vector2, toward: Vector2, owner: int, msg: String, splash := true) -> Homer:
 	var tp := Homer.new()
 	tp.id = _new_id()
 	tp.kind = "yu7"
@@ -1488,9 +1690,13 @@ func _drop_torpedo(at: Vector2, toward: Vector2, owner: int, msg: String) -> voi
 	tp.spin = 1.0 if randf() < 0.5 else -1.0
 	etorps.append(tp)
 	report(msg, "alarm")
-	sound("splash", 0.4)
 	tc = 1
-	emit({"type": "etorp", "pos": Vector3(at.x, 0.0, at.y)})
+	if splash:
+		sound("splash", 0.4)
+		emit({"type": "etorp", "pos": Vector3(at.x, 0.0, at.y)})
+	else:
+		sound("launch", 0.35)
+	return tp
 
 
 ## Their torpedoes: run out, circle and listen, home on the loudest echo
@@ -1581,6 +1787,9 @@ func _update_planes(dt: float) -> void:
 	for p in planes:
 		if p.dead:
 			continue
+		if p.info.get("kind", "") == "mpa":
+			_mpa(p, dt)
+			continue
 		var spd: float = p.kn * U.KN
 		match p.state:
 			"patrol":
@@ -1655,10 +1864,120 @@ func _update_planes(dt: float) -> void:
 		p.pos += U.dirv(p.hdg) * p.kn * U.KN * dt
 
 
+# --------------------------------------------------- the patrol aircraft
+## The patrol aircraft flies its racetrack laying sonobuoy lines across our
+## way. When anything gives us away it comes to the datum, drops a tight
+## pattern of buoys round it, and when they have us, a torpedo. Its radar
+## sees a raised mast a long way off.
+func _mpa(p: Aircraft, dt: float) -> void:
+	var s := sub
+	match p.state:
+		"patrol":
+			var route: Array = mpa_route[p.id]
+			var i: int = mpa_wp[p.id]
+			var goal: Vector2 = route[i]
+			p.alt = move_toward(p.alt, 450.0, 10.0 * dt)
+			_steer(p, U.brg(p.pos, goal), dt, 3.0)
+			if p.pos.distance_to(goal) < 1500.0:
+				mpa_wp[p.id] = (i + 1) % route.size()
+			# Buoys along the legs that cross our way.
+			if i in [1, 3] and _buoy_gap(p.pos) > 2500.0:
+				_drop_buoy(p)
+			if t - datum_t < 300.0 and datum_err < 5000.0 and p.pos.distance_to(datum) < 80000.0:
+				p.state = "localize"
+				p.tgt = datum
+				p.leave_at = t + 480.0
+				p.detect = 0.0
+				report("ESM: patrol aircraft radar, bearing %s, getting stronger. It's coming our way." % U.p3(U.brg(s.pos, p.pos)),
+					"warn", "mpa%d" % p.id, 120.0)
+		"localize":
+			p.alt = move_toward(p.alt, 200.0, 10.0 * dt)
+			if t - datum_t < 60.0:
+				p.tgt = datum
+			if p.pos.distance_to(p.tgt) > 2500.0:
+				_steer(p, U.brg(p.pos, p.tgt), dt, 4.0)
+			else:
+				var a := atan2(p.pos.x - p.tgt.x, p.pos.y - p.tgt.y) + 0.08
+				_steer(p, U.brg(p.pos, p.tgt + Vector2(sin(a), cos(a)) * 2000.0), dt, 6.0)
+				if p.detect < 4.0 and _buoy_gap(p.pos) > 1200.0:
+					_drop_buoy(p)
+					p.detect += 1.0
+			if datum_err < 600.0 and t - datum_t < 90.0 and p.bombs > 0 and t >= next_weapon:
+				p.state = "attack"
+				p.tgt = datum
+			elif t > p.leave_at:
+				p.state = "patrol"
+		"attack":
+			p.alt = move_toward(p.alt, 120.0, 15.0 * dt)
+			_steer(p, U.brg(p.pos, p.tgt), dt, 6.0)
+			if p.pos.distance_to(p.tgt) < 200.0:
+				next_weapon = t + randf_range(40.0, 60.0)
+				p.bombs -= 1
+				_drop_torpedo(p.pos, p.tgt, p.id, "Sonar: splash close aboard, bearing %s! The patrol plane's dropped a torpedo!" % U.p3(U.brg(s.pos, p.pos)))
+				p.state = "localize" if p.bombs > 0 else "patrol"
+				p.leave_at = t + 300.0
+	# Its radar sees a raised mast.
+	if s.scope_up and s.depth <= PERI_MAX and not s.surfaced():
+		var r := p.pos.distance_to(s.pos)
+		if r < 35000.0 and randf() < dt * 0.04 * (1.0 - r / 35000.0) * clampf(mast_t / 15.0, 0.3, 2.0):
+			_new_datum(s.pos, 200.0, null)
+			report("ESM: patrol aircraft radar, bearing %s. It's painting our mast!" % U.p3(U.brg(s.pos, p.pos)), "alarm", "mpamast", 45.0)
+	p.roll = lerpf(p.roll, 0.0, dt)
+	p.pos += U.dirv(p.hdg) * p.kn * U.KN * dt
+
+
+func _buoy_gap(p: Vector2) -> float:
+	var best := 1e9
+	for b in buoys:
+		best = minf(best, b.pos.distance_to(p))
+	return best
+
+
+func _drop_buoy(p: Aircraft) -> void:
+	if int(mpa_buoys.get(p.id, 0)) <= 0:
+		return
+	mpa_buoys[p.id] = int(mpa_buoys[p.id]) - 1
+	var b := Buoy.new()
+	b.id = _new_id()
+	b.pos = p.pos
+	buoys.append(b)
+	emit({"type": "buoy", "pos": Vector3(b.pos.x, 0.0, b.pos.y)})
+	if b.pos.distance_to(sub.pos) < 9000.0 and not sub.surfaced():
+		b.heard = true
+		report("Sonar: small splashes, bearing %s. Sonobuoys going in." % U.p3(U.brg(sub.pos, b.pos)), "warn", "buoys", 40.0)
+
+
+## Buoys listen for us, about as well as a frigate's hull sonar at short
+## range: slow and below the layer, you can pass a few hundred metres off.
+func _update_buoys(dt: float) -> void:
+	var s := sub
+	var keep: Array[Buoy] = []
+	var noise := _own_noise()
+	for b in buoys:
+		b.life -= dt
+		if b.life <= 0.0:
+			continue
+		keep.append(b)
+		if s.surfaced():
+			continue
+		var rng := 5500.0 * noise * (0.55 if s.depth > layer_depth else 1.0)
+		var r := b.pos.distance_to(s.pos)
+		if r < rng and randf() < dt * (0.12 * (1.0 - r / rng) + 0.03):
+			_new_datum(s.pos, 250.0 + r * 0.25, null)
+			report("Sonar: there's a sonobuoy close aboard, bearing %s. It may have us." % U.p3(U.brg(s.pos, b.pos)), "warn", "buoyhear", 60.0)
+	buoys = keep
+
+
 # ---------------------------------------------------- the carrier group
 ## The main target zigzags on her base course; once she knows torpedoes are
 ## about she turns her stern to the threat and runs at full speed.
 func _target_ai(sh: Ship, dt: float) -> void:
+	if sh.type == "ssn":
+		_sub_ai(sh, dt)
+		return
+	if sh.type == "ssbn":
+		_ssbn_ai(sh, dt)
+		return
 	if time_alarmed() and t - datum_t < 600.0:
 		var away := U.brg(datum, sh.pos)
 		var zz := sin(t / 40.0) * 25.0
@@ -1674,6 +1993,187 @@ func _pings() -> void:
 	pass
 
 
+# ------------------------------------------------------- the test launch
+func in_box() -> bool:
+	return box_r > 0.0 and sub.pos.distance_to(box) < box_r
+
+
+## The launch sequence: battle stations missile, spin up, and about a minute
+## later the test round goes, if the boat holds launch depth and a hover all
+## that time. X again stops it.
+func start_test_launch() -> void:
+	var s := sub
+	if trident <= 0 or launched:
+		report("Weapons: no test round left.", "warn")
+		return
+	if launch_seq >= 0.0:
+		launch_seq = -1.0
+		report("Weapons: launch sequence stopped.", "warn")
+		return
+	if not in_box():
+		report("Weapons: we're not in the launch box. It's bearing %s, %.1f km." % [U.p3(U.brg(s.pos, box)),
+			s.pos.distance_to(box) / 1000.0], "warn")
+		return
+	if s.depth < LAUNCH_DEPTH.x or s.depth > LAUNCH_DEPTH.y:
+		report("Weapons: come to launch depth first, %d to %d metres." % [int(LAUNCH_DEPTH.x), int(LAUNCH_DEPTH.y)], "warn")
+		return
+	if absf(s.spd) > HOVER_KN:
+		report("Weapons: slow to a hover first, under %d knots." % int(HOVER_KN), "warn")
+		return
+	launch_seq = t
+	report("Captain: man battle stations missile for the test flight. Spin up tube one.", "good")
+	report("Weapons: hold launch depth and the hover. About a minute to launch.")
+
+
+func _update_launch(dt: float) -> void:
+	if launch_seq < 0.0 or result != "":
+		return
+	var s := sub
+	var held := s.depth >= LAUNCH_DEPTH.x - 3.0 and s.depth <= LAUNCH_DEPTH.y + 3.0 and absf(s.spd) <= HOVER_KN + 1.0 and s.hull > 40.0
+	if not held:
+		launch_seq = -1.0
+		report("Weapons: launch held. We came off the hover or the launch depth. Steady her and press X again.", "warn")
+		return
+	var e := t - launch_seq
+	if e >= LAUNCH_T * 0.5 and e - dt < LAUNCH_T * 0.5:
+		report("Weapons: tube one is pressurized. Test round ready. Thirty seconds.")
+	if e >= LAUNCH_T:
+		_launch_trident()
+
+
+func _launch_trident() -> void:
+	var s := sub
+	launch_seq = -1.0
+	trident -= 1
+	launched = true
+	m_units += 1
+	var m := Missile.new()
+	m.id = _new_id()
+	m.unit = m_units
+	m.kind = "trident"
+	m.owner = -1
+	m.pos = s.pos + U.dirv(s.hdg) * float(nat["sub"]["len"]) * 0.05
+	m.origin = m.pos
+	m.hdg = U.wrap360(s.hdg + 90.0)
+	m.state = "boost"
+	m.seen = true
+	m.t0 = t
+	m.trail = [m.pos]
+	missiles.append(m)
+	m_fired += 1
+	emit({"type": "trident", "pos": Vector3(m.pos.x, 0.0, m.pos.y)})
+	sound("launch", 1.0)
+	shake = maxf(shake, 0.5)
+	report("Weapons: test round away! First stage ignition... she's climbing.", "good")
+	# The plume is seen a hundred kilometres off.
+	_new_datum(s.pos, 250.0, null)
+	_end("launched", 25.0)
+
+
+## The test round: thrown clear of the sea by the gas charge, the first
+## stage lights and she climbs away downrange, out of sight.
+func _fly_trident(m: Missile, dt: float) -> bool:
+	var e := t - m.t0
+	if e < 1.5:
+		m.alt = move_toward(m.alt, 25.0, 20.0 * dt)
+	else:
+		m.spd = minf(m.spd + 60.0 * dt, 2400.0)
+		var climb := deg_to_rad(clampf(88.0 - (e - 1.5) * 0.35, 45.0, 88.0))
+		m.alt += sin(climb) * m.spd * dt
+		m.pos += U.dirv(m.hdg) * cos(climb) * m.spd * dt
+	if e > 4.0 and not m.chaffed:
+		m.chaffed = true
+		report("Weapons: telemetry good. First stage burning normally.")
+	if m.alt > 60000.0:
+		m.dead = true
+		return false
+	return true
+
+
+# ------------------------------------------------------- their submarines
+## Back and forth along a patrol line.
+func _patrol(e: Ship, dt: float) -> void:
+	if e.route.size() < 2:
+		return
+	var goal: Vector2 = e.route[1] if e.orb_dir > 0 else e.route[0]
+	if e.pos.distance_to(goal) < 900.0:
+		e.orb_dir = -e.orb_dir
+	_steer(e, U.brg(e.pos, goal), dt, 3.0)
+
+
+## An attack submarine: sprint-and-drift along its line, or ride with the
+## missile boat; when something gives us away, close the datum fast, then
+## creep in to listen and fire heavyweight torpedoes.
+func _sub_ai(e: Ship, dt: float) -> void:
+	var s := sub
+	var r := e.pos.distance_to(s.pos)
+	_listen(e, r, dt)
+	e.depth = move_toward(e.depth, e.want_depth, 2.0 * dt)
+	match e.state:
+		"patrol":
+			_patrol(e, dt)
+			var sprint := fmod(t + e.id * 97.0, 480.0) < 150.0
+			e.want_spd = 16.0 if sprint else 6.0
+			e.want_depth = clampf(layer_depth + 60.0, 100.0, 220.0)
+		"screen":
+			var st := _station(target, e.off)
+			_steer(e, U.brg(e.pos, st + U.dirv(target.hdg) * 600.0), dt, 3.0)
+			e.want_spd = clampf(target.spd + e.pos.distance_to(st) / 500.0, 3.0, 18.0)
+			e.want_depth = clampf(target.depth + 30.0, 60.0, 250.0)
+		"hunt", "attack":
+			if t - datum_t > 600.0:
+				e.state = e.home
+				return
+			var d := e.pos.distance_to(datum)
+			_steer(e, U.brg(e.pos, datum), dt, 3.0)
+			e.want_spd = 15.0 if d > 15000.0 else 7.0
+			e.want_depth = clampf(s.depth if datum_err < 800.0 else layer_depth + 40.0, 60.0, 300.0)
+			var was := e.state
+			e.state = "attack" if t - datum_t < 180.0 and datum_err < 1500.0 else "hunt"
+			if e.state == "attack" and was != "attack":
+				# A minute or so to work up a firing solution.
+				e.next_dc = maxf(e.next_dc, t + randf_range(45.0, 90.0))
+			if e.state == "attack" and t > e.next_dc and d < 14000.0 and e.to_drop > 0:
+				_sub_shoot(e)
+
+
+func _sub_shoot(e: Ship) -> void:
+	if t < next_weapon:
+		return
+	next_weapon = t + randf_range(50.0, 80.0)
+	e.to_drop -= 1
+	e.next_dc = t + randf_range(90.0, 150.0)
+	e.loud_until = t + 45.0
+	var who := e.short if e.ever_heard else "a submarine"
+	var tp := _drop_torpedo(e.pos, datum, e.id, "Sonar: launch transient, bearing %s! That's %s. Torpedo in the water!" % [
+		U.p3(U.brg(sub.pos, e.pos)), who], false)
+	tp.kind = "yu6"
+	tp.kn = HW_KN
+	tp.rng = HW_RANGE
+	tp.seeker = HW_SEEKER
+	tp.turn = 20.0
+	tp.depth = clampf(sub.depth if datum_err < 800.0 else layer_depth + 30.0, 30.0, 300.0)
+	tp.enable = e.pos.distance_to(datum) * 0.8
+
+
+## A missile submarine on patrol: slow, long legs in her bastion. Alarmed,
+## she runs deep and away.
+func _ssbn_ai(sh: Ship, dt: float) -> void:
+	_listen(sh, sh.pos.distance_to(sub.pos), dt)
+	sh.depth = move_toward(sh.depth, sh.want_depth, 2.0 * dt)
+	if time_alarmed() and t - datum_t < 900.0:
+		_steer(sh, U.brg(datum, sh.pos), dt, 1.5)
+		sh.want_spd = 16.0
+		if sh.hull.engines > 0.5:
+			sh.want_depth = 220.0
+		return
+	if t > sh.next_zig:
+		sh.next_zig = t + randf_range(420.0, 720.0)
+		sh.base_hdg = U.wrap360(sh.base_hdg + randf_range(-70.0, 70.0))
+	_steer(sh, sh.base_hdg, dt, 1.0)
+	sh.want_spd = 6.0
+
+
 func threat() -> Array:
 	var s := sub
 	for tp in etorps:
@@ -1684,8 +2184,10 @@ func threat() -> Array:
 	for p in planes:
 		if not p.dead and p.state in ["dip", "attack"] and p.pos.distance_to(s.pos) < 9000.0:
 			return ["HELICOPTER DIPPING", "warn"]
+		if not p.dead and p.state == "localize" and p.pos.distance_to(s.pos) < 15000.0:
+			return ["PATROL PLANE OVERHEAD", "warn"]
 	for e in ships:
-		if e.kind != "target" and e.alive() and e.state == "attack":
+		if (e.kind != "target" or e.type == "ssn") and e.alive() and e.state == "attack":
 			return ["HUNTED", "warn"]
 	if t - datum_t < 300.0:
 		return ["SEARCHING FOR US", "warn"]
@@ -1699,6 +2201,8 @@ func _check_end() -> void:
 	var tg := target
 	if s.hull <= 0.0:
 		super._check_end()
+		return
+	if spec.get("goal", "") == "patrol":
 		return
 	if tg.alive() and spec.get("goal", "") == "disable" and tg.hull.out_of_action():
 		report("Link: %s is burning end to end and losing way. She's out of action!" % tg.name, "good")

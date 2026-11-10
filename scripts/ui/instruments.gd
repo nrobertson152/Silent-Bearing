@@ -231,6 +231,18 @@ static func draw_chart(ci: CanvasItem, rect: Rect2, w: World, radius: float) -> 
 		if pts.size() > 1:
 			ci.draw_polyline(pts, RED_INK, 1.0)
 		ci.draw_circle(W.call(tp.pos), 3, RED_INK)
+	# The launch box, and sonobuoys we heard splash in.
+	var bx = w.get("box_r")
+	if bx != null and float(bx) > 0.0:
+		var BC: Vector2 = W.call(w.get("box"))
+		ci.draw_arc(BC, float(bx) * ppm, 0, TAU, 48, Color(0.1, 0.45, 0.2), 2.0)
+		text(ci, "LAUNCH BOX", BC + Vector2(-34, -float(bx) * ppm - 8), 12, Color(0.1, 0.45, 0.2))
+	var bl = w.get("buoys")
+	if bl != null:
+		for b in bl:
+			if b.heard:
+				var P: Vector2 = W.call(b.pos)
+				ci.draw_circle(P, 3.0, Color(0.85, 0.4, 0.1))
 	# Where the satellite link last put their ships, run forward.
 	var oth = w.get("oth")
 	if oth != null:
@@ -478,7 +490,18 @@ static func draw_fire_control(ci: CanvasItem, rect: Rect2, w: World) -> void:
 		text(ci, "lock one through the photonics mast, or take the link." if ms.get("has_missiles", false) else
 			"or lock one through the photonics mast.", Vector2(x, y), 15, grey)
 		y += 26
-	if ms.get("has_missiles", false):
+	if ms.has("box_d"):
+		var bline := "IN THE BOX" if ms.get("in_box", false) else "bearing %s, %.1f km" % [U.p3(float(ms["box_brg"])), float(ms["box_d"]) / 1000.0]
+		text(ci, "LAUNCH BOX", Vector2(x, y), 15, grey)
+		text(ci, bline, Vector2(x2, y), 16, PHOS if ms.get("in_box", false) else AMBER)
+		y += 26
+		if wpn == "trident":
+			var lt: float = ms.get("launch", -1.0)
+			text(ci, "LAUNCH", Vector2(x, y), 15, grey)
+			text(ci, "T minus %d s, hold the hover" % int(ceil(60.0 - lt)) if lt >= 0.0 else
+				"25 to 45 m, under 3 knots, in the box: X starts it", Vector2(x2, y), 16, PHOS if lt >= 0.0 else AMBER)
+			y += 26
+	if ms.get("has_missiles", false) and wpn != "trident":
 		var age: float = ms.get("link_age", -1.0)
 		var link_txt := "UP, receiving" if ms.get("linked", false) else "DOWN: raise the mast at periscope depth"
 		if age >= 0.0:
@@ -498,7 +521,7 @@ static func draw_fire_control(ci: CanvasItem, rect: Rect2, w: World) -> void:
 		text(ci, "UNIT %d   %-8s %-5s  run %.1f km" % [int(tp.get("unit")), st, "WIRE" if wired else "CUT", tp.run / 1000.0],
 			Vector2(x, y), 15, PHOS if st == "HOME" else AMBER)
 		y += 22
-	if ms.get("has_missiles", false):
+	if ms.get("strike", false):
 		y += 6
 		var air := int(ms.get("air", 0))
 		var q := int(ms.get("queued", 0))
@@ -532,7 +555,9 @@ static func draw_fire_control(ci: CanvasItem, rect: Rect2, w: World) -> void:
 	text(ci, racks, Vector2(x + s.tubes.size() * 46 + 12, y + 20), 14, grey)
 	y += 60
 	var keys := "Space: fire one   X: two, diverging   G: cut wires   N: decoy"
-	if wpn != "mk48":
+	if wpn == "trident":
+		keys = "X: start or stop the launch sequence   N: decoy"
+	elif wpn != "mk48":
 		keys = "Space: fire one   X: salvo of %d   [ ]: salvo size   N: decoy" % int(ms.get("salvo", 1))
 	text(ci, keys, Vector2(x, y), 13, dim)
 

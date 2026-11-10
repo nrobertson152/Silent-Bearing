@@ -14,9 +14,11 @@ submarine kills of the war, like *Shinano*, *Royal Oak*, *Ark Royal* and
 Or switch the menu to **Near future: Western Pacific** (Tab) for a fictional war at sea
 in the 2030s: take a Virginia-class attack boat after China's carrier *Fujian* and her
 screen, or the cruiser *Nanchang*, with wire-guided Mk 48 torpedoes, Harpoons, Tomahawks
-and decoys, against a screen that hunts you with sonar and helicopters. Or take an
-Ohio-class guided-missile boat with 154 Tomahawks against the carrier *Shandong* and
-her air-defence screen.
+and decoys, against a screen that hunts you with sonar and helicopters, or hunt the
+missile submarine *Jin 416* in her bastion. Take an Ohio-class guided-missile boat with
+154 Tomahawks against the carrier *Shandong* and her air-defence screen. Or take an
+Ohio-class ballistic-missile boat through a sea full of hunters to fire an unarmed
+Trident II test round from a launch box.
 
 The original 2D pygame version is preserved at the `v1.0.0` tag.
 
@@ -159,7 +161,7 @@ she's badly hurt.
 | `F11` | Fullscreen |
 | `Esc` | Leave a station or pause |
 
-In the near-future boats `Q` picks the weapon (Mk 48, Harpoon, Tomahawk), `[` `]` set the
+In the near-future boats `Q` picks the weapon (Mk 48, Harpoon, Tomahawk, Trident), `[` `]` set the
 missile salvo, `X` fires two Mk 48s or the salvo, `G` cuts the torpedo guidance wires and
 `N` launches a decoy. `F1` shows the full list in the game.
 
@@ -204,9 +206,10 @@ A fictional war in the Western Pacific. The boats, ships and weapons are modelle
 public figures, rounded and adjusted for play.
 
 - **Your boats:** a Virginia-class attack submarine (22 Mk 48s, 4 Harpoons, 12
-  Tomahawks) or an Ohio-class guided-missile boat (154 Tomahawks in 22 tubes, and
-  Mk 48s). Nuclear, so no battery or air to nurse; very quiet below about 10 knots,
-  loud above 20. No deck gun, and nobody goes topside. You fight from a modern control
+  Tomahawks), an Ohio-class guided-missile boat (154 Tomahawks in 22 tubes, and
+  Mk 48s) or an Ohio-class ballistic-missile boat (an unarmed Trident II test round,
+  and Mk 48s; the quietest of the three). Nuclear, so no battery or air to nurse; very
+  quiet below about 10 knots, loud above 20. No deck gun, and nobody goes topside. You fight from a modern control
   room: ship control, the photonics mast displays, the sonar stack, fire control, the
   digital plot and the status board.
 - **Finding them:** the towed array hears a carrier group tens of kilometres away, but
@@ -225,6 +228,22 @@ public figures, rounded and adjusted for play.
   18 km by rocket. Hear a torpedo coming and you have a minute or two: launch decoys
   (`N`), put it astern, run deep across the thermal layer, then slow down and creep
   away.
+- **Their submarines:** Type 093 attack boats sprint and drift along their patrol lines,
+  listening; one that hears you closes the datum, takes a minute to work up a solution
+  and fires heavyweight torpedoes. You hear its launch transient, and for a while the
+  boat itself, loud on the array. A Type 094 missile boat creeps through her bastion
+  and runs deep when alarmed. Hearing works both ways: slow and on the same side of the
+  layer as them you hear them first. Mk 48s run out at a submarine's depth and home in
+  three dimensions.
+- **The patrol aircraft:** a KQ-200 flies a racetrack across your way laying sonobuoy
+  lines. You hear the buoys splash in when close, and they go on the plot. A buoy
+  hears a boat that passes close, or fast. Anything that gives you away brings the
+  plane: it lays a tight pattern round the datum and drops a torpedo once it has you.
+  Its radar sees a raised mast from far off.
+- **The test launch:** in the launch box, at 25 to 45 m and a hover under 3 knots,
+  pick the Trident (`Q`) and press `X`. Battle stations missile, spin-up, and a minute
+  later the round is thrown clear of the sea and its first stage lights. Come off the
+  depth or the hover and the launch is held. Once she goes, everyone knows where you are.
 - **The satellite link:** at periscope depth with the mast up, offboard reports
   (satellites, patrol aircraft) give the whole group's positions every few minutes,
   far beyond sonar range. They show on the plot as blue squares.
@@ -246,6 +265,8 @@ public figures, rounded and adjusted for play.
 | Virginia | Fujian | Type 003 catapult carrier | Type 055 cruiser, two Type 052D destroyers, Type 054A frigate, two helicopters |
 | Virginia, Ohio | Nanchang | Type 055 cruiser | Type 052D destroyer, Type 054A frigate, a helicopter |
 | Ohio | Shandong | Type 002 ski-jump carrier, 50 km off | Type 055 cruiser, two Type 052D destroyers, Type 054A picket 20 km ahead, two helicopters |
+| Virginia | Jin 416 | Type 094 missile submarine, deep, about 13 km off | Type 093 attack submarine, Type 054A frigate, a helicopter |
+| Ohio (SSBN) | Deterrent patrol | Fire a Trident II test round from a box 22 km north | Two Type 093s on patrol lines, a Type 054A, a KQ-200 laying sonobuoys, a helicopter |
 
 ## The navies
 
@@ -268,7 +289,8 @@ scripts/
   util.gd                  bearing and aiming helpers
   sim/world.gd             the simulation: no rendering, fully testable
   sim/modern_world.gd      the near-future war: towed arrays, Mk 48s, decoys, missiles, the
-                           satellite link, their hunters and their air defence
+                           satellite link, their hunters, submarines, patrol aircraft and
+                           sonobuoys, their air defence, and the test launch
   sim/sim.gd               picks the wartime or near-future simulation for a boat
   sim/damage.gd            warship flooding, stability, fires, magazines and machinery
   sim/ballistics.gd        shell flight with air drag, and armour penetration

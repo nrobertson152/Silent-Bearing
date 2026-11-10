@@ -142,6 +142,11 @@ class Ship:
 	var hits_taken := 0
 	var hull: Damage            # compartments, flooding, list, machinery, rudder, fires
 	var said := {}              # damage reports already given
+	var depth := 0.0            # submarines: metres below the surface
+	var want_depth := 0.0
+	var route: Array = []       # patrol line [from, to] for units that patrol rather than screen
+	var home := "screen"        # the state a unit goes back to when the hunt is off
+	var loud_until := 0.0       # a submarine that just fired is loud on our array till then
 
 	func alive() -> bool:
 		return not dead and struct > 0.0
@@ -885,7 +890,7 @@ func update(dt: float) -> void:
 	ping_flash = maxf(0.0, ping_flash - dt * 1.5)
 	var hunted := false
 	for e in ships:
-		if e.kind != "target" and e.alive() and e.state != "screen":
+		if e.kind != "target" and e.alive() and e.state not in ["screen", "patrol"]:
 			hunted = true
 	for p in planes:
 		if not p.dead and p.state != "patrol":

@@ -199,7 +199,7 @@ func start_mission(nid: String, tid: String) -> void:
 	chart_r = 6000.0
 	if modern:
 		# Far enough out to show where the link puts a distant group.
-		chart_r = 24000.0 if not spec.has("start") else 64000.0
+		chart_r = 64000.0 if spec.has("start") and spec["type"] not in ["ssn", "ssbn"] else 24000.0
 	menu.root.visible = false
 	hud.root.visible = true
 	hud.pause.visible = false

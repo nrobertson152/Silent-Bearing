@@ -49,6 +49,8 @@ var planes := {}
 var shells := {}
 var torps := {}
 var mnodes := {}                 # missile id -> {"node", "meshes", "flame", "smoke", "last", "pitch"}
+var bnodes := {}                 # sonobuoy id -> its float
+var m_buoy: StandardMaterial3D
 var time := 0.0
 var wind := Vector3(1, 0, 0)
 var m_smoke: Material
@@ -180,6 +182,9 @@ func underwater_env() -> Environment:
 
 
 func _add_ship(sh: World.Ship) -> void:
+	if sh.type in ["ssn", "ssbn"]:
+		_add_enemy_sub(sh)
+		return
 	var node := ShipBuilder.build(sh.layout, sh.length, sh.beam, sh.draft)
 	add_child(node)
 	var rec := {"node": node, "turrets": node.get_meta("turrets"), "smoke": [], "fires": [], "fire_at": [],
@@ -201,6 +206,32 @@ func _add_ship(sh: World.Ship) -> void:
 	ships[sh.id] = rec
 	# Put her where she is now, or her first smoke rises from the middle of the map.
 	node.transform = _ship_xform(sh, rec, 0.0)
+
+
+## Their submarines: the same kind of model as your boat, held at depth,
+## going down by the head when sunk. A wake only if one comes up.
+func _add_enemy_sub(sh: World.Ship) -> void:
+	var style := String(GameData.layout(sh.layout).get("sub", "t093"))
+	var node := SubBuilder.build({"sub": {"len": sh.length, "beam": sh.beam, "tower": 0.3, "style": style}})
+	add_child(node)
+	ships[sh.id] = {"node": node, "sub": true, "wk": wakes.ship(node, sh.beam, sh.length, 30.0)}
+	node.transform = _sub_xform(sh)
+
+
+func _sub_xform(sh: World.Ship) -> Transform3D:
+	return Transform3D(Basis.from_euler(Vector3(-sh.sinking * 0.6, U.yaw(sh.hdg), 0.0), EULER_ORDER_YXZ),
+		Vector3(sh.pos.x, -sh.depth - sh.sinking * 120.0, -sh.pos.y))
+
+
+func _sync_enemy_sub(sh: World.Ship, rec: Dictionary) -> void:
+	var node: Node3D = rec["node"]
+	if sh.dead:
+		if node.visible:
+			node.visible = false
+			wakes.free_ship(rec["wk"])
+		return
+	node.transform = _sub_xform(sh)
+	wakes.steer(rec["wk"], node.transform, sh.length * 0.5, sh.spd, sh.depth < 4.0)
 
 
 ## Ship transform: riding the swell (big ships answer slowly and barely
@@ -414,6 +445,9 @@ func sync(dt: float, cam_pos: Vector3) -> void:
 		var rec: Dictionary = ships.get(sh.id)
 		if rec == null:
 			continue
+		if rec.get("sub", false):
+			_sync_enemy_sub(sh, rec)
+			continue
 		var node: Node3D = rec["node"]
 		if sh.dead:
 			if node.visible:
@@ -449,6 +483,7 @@ func sync(dt: float, cam_pos: Vector3) -> void:
 	_sync_shells()
 	_sync_torps()
 	_sync_missiles(dt)
+	_sync_buoys()
 
 
 func _aim_turrets(sh: World.Ship, rec: Dictionary, dt: float) -> void:
@@ -675,14 +710,47 @@ func _sync_missiles(dt: float) -> void:
 		rec["last"] = p
 		var node: Node3D = rec["node"]
 		node.transform = Transform3D(Basis.from_euler(Vector3(float(rec["pitch"]), U.yaw(m.hdg), 0.0), EULER_ORDER_YXZ), p)
-		# Theirs burn all the way; ours only on the booster climbing out.
-		var burning: bool = m.owner >= 0 or m.state == "boost"
+		# Theirs burn all the way; ours only on the booster climbing out (the
+		# Trident lights once the gas charge has thrown her clear of the sea).
+		var burning: bool = m.owner >= 0 or (m.state == "boost" and (m.kind != "trident" or world.t - m.t0 > 1.4))
 		(rec["flame"] as CPUParticles3D).emitting = burning
 		(rec["smoke"] as CPUParticles3D).emitting = burning or (m.state == "dive" and m.alt > 40.0)
+		if rec.has("light"):
+			(rec["light"] as Node3D).visible = burning
 	for id in mnodes.keys():
 		if not seen.has(id):
 			fx.drop_missile(mnodes[id])
 			mnodes.erase(id)
+
+
+## Sonobuoys bobbing where the patrol aircraft dropped them.
+func _sync_buoys() -> void:
+	var list = world.get("buoys")
+	if list == null:
+		return
+	if m_buoy == null:
+		m_buoy = MeshKit.mat(Color(0.95, 0.45, 0.1), 0.6, 0.0, Color(0.6, 0.25, 0.05), 0.3)
+	var seen := {}
+	for b in list:
+		seen[b.id] = true
+		var mi: MeshInstance3D = bnodes.get(b.id)
+		if mi == null:
+			mi = MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.top_radius = 0.12
+			cm.bottom_radius = 0.16
+			cm.height = 1.0
+			mi.mesh = cm
+			mi.material_override = m_buoy
+			add_child(mi)
+			bnodes[b.id] = mi
+		var x: float = b.pos.x
+		var z: float = -b.pos.y
+		mi.position = Vector3(x, ocean.height(x, z) + 0.2, z)
+	for id in bnodes.keys():
+		if not seen.has(id):
+			(bnodes[id] as Node).queue_free()
+			bnodes.erase(id)
 
 
 static func s3(v: Vector3) -> Vector3:
@@ -701,6 +769,10 @@ func handle_event(ev: Dictionary) -> void:
 			fx.bubbles(s3(ev["pos"]))
 		"mlaunch":
 			fx.broach(s3(ev["pos"]))
+		"trident":
+			fx.trident_launch(s3(ev["pos"]))
+		"buoy":
+			fx.splash(s3(ev["pos"]), 0.7)
 		"sam":
 			fx.cell_launch(s3(ev["pos"]))
 		"ciws":

@@ -157,6 +157,8 @@ static func _missile_text(nat: Dictionary) -> String:
 	for k in ["harpoon", "tomahawk"]:
 		if int(ms.get(k, 0)) > 0:
 			parts.append("%d %s" % [int(ms[k]), GameData.MISSILES[k]["name"]])
+	if int(ms.get("trident", 0)) > 0:
+		parts.append("%d Trident test round" % int(ms["trident"]))
 	return ", ".join(parts) if not parts.is_empty() else "none"
 
 
@@ -227,6 +229,9 @@ func _targets() -> void:
 				["Out of action", "about 5 missile hits"] if tg.get("goal", "") == "disable" else ["Mk 48 hits", str(tg["hp"])]]
 			if tg.has("start"):
 				rows.insert(1, ["Range", "about %d km" % int(float(tg["start"][0]) / 1000.0)])
+			if tg.get("goal", "") == "patrol":
+				rows = [["Mission", "Test launch"], ["Launch box", "%d km north" % int((tg["box"] as Vector2).length() / 1000.0)],
+					["Hunters", "2 submarines, a frigate"], ["Aircraft", "%d" % tg["air"].size()], ["Conditions", tg["tod"].capitalize()]]
 		for kv in rows:
 			info.add_child(Style.label(kv[0], 12, Style.MUTED))
 			info.add_child(Style.label(kv[1], 12, Style.TEXT))
@@ -255,7 +260,8 @@ func _brief() -> void:
 	hb.add_child(left)
 	left.add_child(Style.label(Style.spaced("PATROL ORDERS"), 14, Style.MUTED))
 	left.add_child(Style.label(GameData.PREFIX[tg["nation"]] + tg["name"], 36, Style.TEXT))
-	left.add_child(Style.label("%s   |   %s" % [GameData.TYPE_NAMES[tg["type"]], tg["credit"]], 15, Style.BRASS))
+	var kind_txt: String = "Test launch" if tg.get("goal", "") == "patrol" else GameData.TYPE_NAMES[tg["type"]]
+	left.add_child(Style.label("%s   |   %s" % [kind_txt, tg["credit"]], 15, Style.BRASS))
 	var note := Style.label(tg["note"], 15, Style.TEXT, true)
 	note.custom_minimum_size = Vector2(520, 0)
 	left.add_child(note)
@@ -276,7 +282,7 @@ func _brief() -> void:
 			["To sink her", "about %d torpedo hits, fewer all down one side" % tg["hp"]]]
 	if modern:
 		# "Yan'an (cruiser), Guiyang and Chengdu (destroyers), Yueyang (frigate)"
-		var kinds := {"cg": "cruiser", "ddg": "destroyer", "ffg": "frigate", "cv": "carrier"}
+		var kinds := {"cg": "cruiser", "ddg": "destroyer", "ffg": "frigate", "cv": "carrier", "ssn": "attack submarine"}
 		var by_type := {}
 		var order := []
 		for e in tg.get("group", []):
@@ -301,16 +307,33 @@ func _brief() -> void:
 			boat += ", " + _missile_text(nat)
 		rows = [["Your boat", boat + ", %d decoys" % nat.get("decoys", 0)],
 			["Conditions", tg["tod"].capitalize()],
-			["Target", "about %d knots, zigzagging" % int(float(tg["kn"]) * 0.7)],
+			["Target", "about 6 knots, deep, below the layer" if tg["type"] in ["ssn", "ssbn"] else "about %d knots, zigzagging" % int(float(tg["kn"]) * 0.7)],
 			["Screen", ", ".join(screen)], ["Helicopters", air]]
-		if tg.has("start"):
+		if tg.has("start") and tg["type"] in ["ssn", "ssbn"]:
+			rows.insert(2, ["Range", "about %d km, deep and slow. Intelligence gives a rough bearing; find her by ear." % int(float(tg["start"][0]) / 1000.0)])
+		elif tg.has("start"):
 			rows.insert(2, ["Range", "about %d km, far beyond sonar. The satellite link gives her position." % int(float(tg["start"][0]) / 1000.0)])
-		if tg.get("goal", "") == "disable":
+		if tg.get("goal", "") == "patrol":
+			var hunters := ["%s (Type 093)" % tg["target_name"]]
+			for e in tg.get("group", []):
+				hunters.append("%s (%s)" % [e["name"], "Type 093" if e["type"] == "ssn" else "frigate"])
+			rows = [["Your boat", boat + ", %d decoys" % nat.get("decoys", 0)],
+				["Conditions", tg["tod"].capitalize()],
+				["Launch box", "%d km north, %d km across. Hover at 25 to 45 m, under 3 knots, for a minute." % [
+					int((tg["box"] as Vector2).length() / 1000.0), int(float(tg["box_r"]) * 2.0 / 1000.0)]],
+				["Hunters", ", ".join(hunters)], ["Aircraft", air],
+				["Weapons", "Mk 48s and decoys to defend yourself. Better not to be found at all."],
+				["To win", "fire the test round from the box"]]
+		if tg.get("goal", "") == "patrol":
+			pass
+		elif tg.get("goal", "") == "disable":
 			rows.append(["Weapons", "Tomahawks: a big salvo arriving together swamps their air defence. Mk 48s for close in."])
 			rows.append(["To win", "wreck her: about 5 Tomahawk hits put her out of action, or sink her with about %d Mk 48s" % tg["hp"]])
 		else:
 			var wpn := "Mk 48s run out on the wire, then home on what they hear and burst under her keel"
-			if (nat.get("missiles", {}) as Dictionary).size() > 0:
+			if tg["type"] in ["ssn", "ssbn"]:
+				wpn += ". Missiles are no use against a boat that stays deep."
+			elif (nat.get("missiles", {}) as Dictionary).size() > 0:
 				wpn += ". Missiles reach much farther, but a handful won't get through this screen."
 			rows.append(["Weapons", wpn])
 			rows.append(["To sink her", "about %d Mk 48 hits" % tg["hp"]])
@@ -321,7 +344,11 @@ func _brief() -> void:
 		g.add_child(val)
 	left.add_child(g)
 	var tip_text := "Approach at periscope depth and keep the scope up only in short looks. Lock her on the TDC and let the solution settle. Fire from 1,000 to 2,500 metres off her beam. When escorts turn on you, go deep, slow down and change course. Planes spot surfaced boats from far away: dive when the lookouts call them."
-	if modern and tg.has("start"):
+	if modern and tg.get("goal", "") == "patrol":
+		tip_text = "Stay deep, below the layer, and slow: under about 6 knots an Ohio is almost silent. Listen for the hunters on the towed array and give them a wide berth; their attack boats sprint and then drift to listen. Small splashes mean the patrol aircraft is laying sonobuoys: go round the line or creep through it. In the box, come up to 30 to 40 m, slow to a hover, pick the Trident (Q) and press X. The launch takes a minute, and once she goes, everyone knows where you are."
+	elif modern and tg["type"] in ["ssn", "ssbn"]:
+		tip_text = "She's deep and quiet, and her escort is quieter still. Go slow and listen: the array hears her before she hears you. Track her (L), change legs to firm up the range, and get under the layer with her. The Mk 48s run out at her depth and home in three dimensions. If a launch transient comes, decoys and a hard turn, then answer down its bearing."
+	elif modern and tg.has("start"):
 		tip_text = "Come up to periscope depth, raise the mast (P) and take the link: it gives the whole group's positions every few minutes. Pick Tomahawks (Q), set the salvo ([ ]) and fire (X) from above 45 m at under 10 knots. Their missiles and guns will knock down most of a small salvo; it takes around 60 arriving together to swamp them. Their picket will see the launch, so go deep and slow afterwards. Leaving the mast up lets the Tomahawks take fresher aim points."
 	elif modern:
 		tip_text = "Close in deep and slow: under about 10 knots the escorts' sonar can barely hear you. Listen on the towed array, lock her on sonar (L) and change course now and then so fire control can work out her range. A short look through the photonics mast firms it up, but their radars may see it. Fire from 8 to 20 km and keep the wire on. When a torpedo comes for you: launch decoys (N), turn away, run deep across the layer, then slow down and creep off."

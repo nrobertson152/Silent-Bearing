@@ -16,6 +16,14 @@ const CLASSES := {
 	"ohio": {"draft": 10.8, "bow": 0.09, "aft": 0.66, "tail_r": 0.16,
 		"sail": {"u": 0.205, "l": 14.0, "w": 2.9, "h": 8.0, "planes": true},
 		"bow_planes": 0.0, "pumpjet": false, "missile_deck": true},
+	# Theirs: the Type 093 attack boat, and the Type 094 with its tall
+	# missile-deck hump behind the sail.
+	"t093": {"draft": 9.2, "bow": 0.13, "aft": 0.6, "tail_r": 0.17,
+		"sail": {"u": 0.27, "l": 11.5, "w": 2.6, "h": 6.2, "planes": false},
+		"bow_planes": 0.1, "pumpjet": false, "missile_deck": false},
+	"t094": {"draft": 10.2, "bow": 0.11, "aft": 0.62, "tail_r": 0.16,
+		"sail": {"u": 0.22, "l": 13.0, "w": 2.8, "h": 7.0, "planes": true},
+		"bow_planes": 0.0, "pumpjet": false, "missile_deck": true, "deck": [0.3, 0.56], "deck_h": 2.6, "tubes": 6},
 }
 
 
@@ -182,11 +190,12 @@ static func _sail(k: MeshKit, c: Dictionary, sz: float, sl: float, sw: float, sh
 
 ## Ohio-class missile deck: a flat fairing over the tubes with two rows of hatches.
 static func _missile_deck(k: MeshKit, c: Dictionary, L: float, R: float, yc: float, top: float) -> void:
-	var z0 := (0.26 - 0.5) * L
-	var z1 := (0.60 - 0.5) * L
-	var h := 1.1
+	var span: Array = c.get("deck", [0.26, 0.6])
+	var z0 := (float(span[0]) - 0.5) * L
+	var z1 := (float(span[1]) - 0.5) * L
+	var h := float(c.get("deck_h", 1.1))
 	k.block("hull", 0, (z0 + z1) * 0.5, top - 0.8, top + h, R * 1.35, z1 - z0, R * 1.05, z1 - z0 - 6.0)
-	var n := 12
+	var n := int(c.get("tubes", 12))
 	for i in n:
 		var z := lerpf(z0 + 4.5, z1 - 4.5, float(i) / (n - 1))
 		for side in [-1.0, 1.0]:

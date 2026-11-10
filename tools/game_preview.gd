@@ -29,11 +29,18 @@ func _init() -> void:
 		# The near-future boats: one control room, no deck watch.
 		steps = ["menu_modern", "targets", "brief", "start", "interior", "interior_fwd", "sonar", "tdc", "chart",
 			"periscope", "periscope_zoom", "external", "under", "result"]
-		if GameData.nations()[nid].has("missiles"):
+		var ms: Dictionary = GameData.nations()[nid].get("missiles", {})
+		if ms.has("tomahawk") or ms.has("harpoon"):
 			# A salvo: the launch, their defences at work, and the plot.
 			steps.insert(steps.find("external"), "salvo")
 			steps.insert(steps.find("external"), "defence")
 			steps.insert(steps.find("external"), "missile_chart")
+		if ms.has("trident"):
+			# The test launch from the box, seen from outside, and the plot.
+			steps.insert(steps.find("external"), "box_plot")
+			steps.insert(steps.find("external"), "trident")
+		if tid in ["jin", "patrol"]:
+			steps.insert(steps.find("external"), "sub_view")
 
 
 func _snap(name: String) -> void:
@@ -227,6 +234,67 @@ func _process(_dt: float) -> bool:
 			_snap("19_plot_missiles")
 			game.close_overlay()
 			w.tc = 1
+		"box_plot":
+			game.chart_r = 24000.0
+			game.open_overlay("chart")
+			wait = 4
+			steps.pop_front()
+			steps.push_front("box_plot_snap")
+			return false
+		"box_plot_snap":
+			_snap("20_plot_patrol")
+			game.close_overlay()
+		"trident":
+			w.sub.pos = w.get("box")
+			w.sub.depth = 35.0
+			w.sub.dep_ord = 35.0
+			w.sub.spd = 0.0
+			w.sub.tel = 2
+			w.sub.scope_up = false
+			w.set("weapon", "trident")
+			w.etorps.clear()
+			w.t += 100.0
+			w.fire(3)
+			# Skip most of the minute's countdown.
+			w.set("launch_seq", w.t - 57.0)
+			w.tc = 1
+			game.set_mode("external")
+			game.ext_dist = 260.0
+			game.ext_yaw = 2.4
+			game.ext_pitch = 0.32
+			wait = 70
+			steps.pop_front()
+			steps.push_front("trident_snap")
+			return false
+		"trident_snap":
+			w.tc = 1
+			_snap("21_trident_launch")
+			wait = 40
+			steps.pop_front()
+			steps.push_front("trident_snap2")
+			return false
+		"trident_snap2":
+			_snap("22_trident_climb")
+		"sub_view":
+			# Alongside their submarine, under water.
+			var tg := w.target
+			for e in w.ships:
+				if e.type == "ssn" and e.kind == "escort":
+					tg = e if tid == "patrol" else tg
+			w.sub.pos = tg.pos + U.dirv(tg.hdg + 90.0) * 90.0 + U.dirv(tg.hdg) * 30.0
+			w.sub.depth = tg.depth + 25.0
+			w.sub.dep_ord = w.sub.depth
+			w.sub.hdg = tg.hdg
+			game.set_mode("external")
+			game.ext_dist = 160.0
+			game.ext_yaw = 2.0
+			game.ext_pitch = -0.05
+			wait = 8
+			steps.pop_front()
+			steps.push_front("sub_view_snap")
+			return false
+		"sub_view_snap":
+			_snap("23_their_sub")
 		"surface":
 			w.sub.depth = 0.0
 			w.sub.flood = 0.0

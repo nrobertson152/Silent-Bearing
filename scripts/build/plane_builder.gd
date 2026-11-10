@@ -90,6 +90,12 @@ static func _parts(k: MeshKit, xf: Transform3D, kind: String, span: float, lengt
 	else:
 		k.cyl(mat, xf * Vector3(0, 0, nose), xf * Vector3(0, 0, wing_z + length * 0.1), r * 0.95, r, 10)
 		k.cyl(mat, xf * Vector3(0, 0, wing_z + length * 0.1), xf * Vector3(0, r * 0.3, tail), r, r * 0.25, 10)
+		if kind == "mpa":
+			# A high wing over the cabin, a radome under the nose and a
+			# magnetic-anomaly boom sticking out behind the tail.
+			wing_y = r * 0.85
+			k.sphere("black", xf * Vector3(0, -r * 0.75, nose + length * 0.12), r * 0.7, 10, 6)
+			k.cyl(mat, xf * Vector3(0, r * 0.3, tail - 0.5), xf * Vector3(0, r * 0.3, tail + length * 0.12), r * 0.2, r * 0.08, 8)
 	# Canopy.
 	k.box("glass", xf * Vector3(0, r * (1.0 if not boat else 0.95), nose + length * (0.22 if not boat else 0.12)),
 		Vector3(r * 0.9, r * 0.7, length * 0.16), xf.basis)
